@@ -136,9 +136,11 @@ function expectStateOutputBusesArePinned(graph: ReturnType<typeof buildAndLayout
   for (const state of states) {
     const qEdge = graph.edges.find((edge) => edge.from === `ff:${state}` && edge.to === `state:${state}`);
     const qBarEdge = graph.edges.find((edge) => edge.from === `ff:${state}` && edge.to === `state-not:${state}`);
-    expect(qEdge?.sourceAnchor?.y, `Q bus ${state}`).toBe(qEdge?.targetAnchor?.y);
-    expect(qBarEdge?.sourceAnchor?.y, `Qbar bus ${state}`).toBe(qBarEdge?.targetAnchor?.y);
-    expect(qBarEdge?.sourceAnchor?.x, `Qbar source ${state}`).toBeLessThan(qBarEdge?.targetAnchor?.x ?? 0);
+    if (qEdge) expect(qEdge.sourceAnchor?.y, `Q bus ${state}`).toBe(qEdge.targetAnchor?.y);
+    if (qBarEdge) {
+      expect(qBarEdge.sourceAnchor?.y, `Qbar bus ${state}`).toBe(qBarEdge.targetAnchor?.y);
+      expect(qBarEdge.sourceAnchor?.x, `Qbar source ${state}`).toBeLessThan(qBarEdge.targetAnchor?.x ?? 0);
+    }
   }
 }
 
@@ -255,8 +257,12 @@ function expectStateVariablesComeOnlyFromFlipFlops(graph: ReturnType<typeof buil
   for (const state of states) {
     expect(graph.nodes.some((node) => node.id === `input:${state}`), `${state} standalone input`).toBe(false);
     expect(graph.nodes.some((node) => node.id === `input:${state}'`), `${state}' standalone input`).toBe(false);
-    expect(graph.edges.some((edge) => edge.from === `ff:${state}` && edge.to === `state:${state}` && edge.fromPin === "Q")).toBe(true);
-    expect(graph.edges.some((edge) => edge.from === `ff:${state}` && edge.to === `state-not:${state}` && edge.fromPin === "Q'")).toBe(true);
+    if (graph.edges.some((edge) => edge.from === `state:${state}`)) {
+      expect(graph.edges.some((edge) => edge.from === `ff:${state}` && edge.to === `state:${state}` && edge.fromPin === "Q")).toBe(true);
+    }
+    if (graph.edges.some((edge) => edge.from === `state-not:${state}`)) {
+      expect(graph.edges.some((edge) => edge.from === `ff:${state}` && edge.to === `state-not:${state}` && edge.fromPin === "Q'")).toBe(true);
+    }
   }
 }
 
@@ -303,9 +309,10 @@ function expectStateFeedbackUsesRightBusThenSignalBus(graph: ReturnType<typeof b
     if (edge.netId !== sourceNet) continue;
     const points = toPointArray(edge.points ?? []);
     expect(points.length, edge.id).toBeGreaterThanOrEqual(5);
-    expect(points[1].x, `${edge.id} right feedback bus`).toBe(points[0].x);
-    expect(points[2].y, `${edge.id} feedback lane`).toBe(points[1].y);
-    expect(points[2].x, `${edge.id} returns left`).toBeLessThan(points[0].x);
+    expect(points[1].x, `${edge.id} right feedback exit`).toBeGreaterThan(points[0].x);
+    expect(points[2].x, `${edge.id} right feedback bus`).toBe(points[1].x);
+    expect(points[3].y, `${edge.id} feedback lane`).toBe(points[2].y);
+    expect(points[3].x, `${edge.id} returns left`).toBeLessThan(points[0].x);
   }
 }
 
@@ -420,6 +427,70 @@ describe("circuit graph generation", () => {
     expectStateFeedbackUsesRightBusThenSignalBus(graph);
     expectClockStaysClearOfLogicGates(graph);
     expectLogicGatesAreSeparated(graph);
+  });
+
+  it("generates D flip-flop circuits from current equations without JK pins or net overlaps", () => {
+    const graph = buildAndLayout("d", ["A", "B"], {
+      D_A: "A'B + B'X",
+      D_B: "B'X' + BX + AX",
+      Z: "BX + AX + AB",
+    });
+
+    expect(graph.metadata.validationErrors ?? []).toEqual([]);
+    expect(graph.edges.some((edge) => edge.to === "ff:A" && edge.toPin === "D" && edge.netId === "DA")).toBe(true);
+    expect(graph.edges.some((edge) => edge.to === "ff:B" && edge.toPin === "D" && edge.netId === "DB")).toBe(true);
+    expect(graph.edges.some((edge) => edge.toPin === "J" || edge.toPin === "K")).toBe(false);
+    expect(graph.nodes.filter((node) => node.type === "FF").every((node) => node.flipFlopType === "d")).toBe(true);
+
+    for (const nodeId of ["state:A", "state-not:A", "state:B", "state-not:B"]) {
+      const node = graph.nodes.find((candidate) => candidate.id === nodeId);
+      expect(node, nodeId).toBeTruthy();
+      expect(typeof node?.metadata?.busX, nodeId).toBe("number");
+      expect(typeof node?.metadata?.feedbackLaneY, nodeId).toBe("number");
+      expect(node?.metadata?.labelX, `${nodeId} hidden label x`).toBeUndefined();
+      expect(node?.metadata?.labelY, `${nodeId} hidden label y`).toBeUndefined();
+    }
+
+    expectAllEdgesHaveNetIds(graph);
+    expectAllWiresAreOrthogonal(graph);
+    expectNoWireObstacleCollisions(graph);
+    expectNoFullyOverlappedWireSegments(graph);
+    expectGateInputWiresReachGateBodies(graph);
+    expectStateVariablesComeOnlyFromFlipFlops(graph, ["A", "B"]);
+    expectStateGateInputsTraceToFlipFlops(graph);
+  });
+
+  it("generates T flip-flop circuits when X' directly feeds an OR gate", () => {
+    const graph = buildAndLayout("t", ["A", "B"], {
+      T_A: "A'X + B + AX'",
+      T_B: "X' + AB'",
+      Z: "BX + AX + AB",
+    });
+
+    expect(graph.metadata.validationErrors ?? []).toEqual([]);
+    expect(graph.edges.some((edge) => edge.to === "ff:A" && edge.toPin === "T" && edge.netId === "TA")).toBe(true);
+    expect(graph.edges.some((edge) => edge.to === "ff:B" && edge.toPin === "T" && edge.netId === "TB")).toBe(true);
+    expect(graph.edges.some((edge) => edge.wireId === "XNOT_not_X_out_to_gate_or_3_in0")).toBe(true);
+    expect(graph.nodes.filter((node) => node.type === "STATE" || node.type === "STATE_NOT").every((node) => node.metadata?.labelX === undefined && node.metadata?.labelY === undefined)).toBe(true);
+    expectAllWiresAreOrthogonal(graph);
+    expectNoWireObstacleCollisions(graph);
+    expectNoFullyOverlappedWireSegments(graph);
+  });
+
+  it("does not draw flip-flop output wires for unused Q or Q' ports", () => {
+    const graph = buildAndLayout("jk", ["A", "B"], {
+      J_A: "X + B",
+      K_A: "X + B",
+      J_B: "X",
+      K_B: "X",
+      Z: "X",
+    });
+
+    expect(graph.metadata.validationErrors ?? []).toEqual([]);
+    expect(graph.edges.some((edge) => edge.from === "ff:A" && edge.to === "state:A" && edge.fromPin === "Q")).toBe(false);
+    expect(graph.edges.some((edge) => edge.from === "ff:A" && edge.to === "state-not:A" && edge.fromPin === "Q'")).toBe(false);
+    expect(graph.edges.some((edge) => edge.from === "ff:B" && edge.to === "state:B" && edge.fromPin === "Q")).toBe(true);
+    expect(graph.edges.some((edge) => edge.from === "ff:B" && edge.to === "state-not:B" && edge.fromPin === "Q'")).toBe(false);
   });
 
   it("exports complete SVG wires with debug attributes", () => {

@@ -66,12 +66,6 @@ function pinOffset(pin?: string) {
   return 42;
 }
 
-function pinRoutingOffset(pin?: string) {
-  if (pin === "J" || pin === "S") return -36;
-  if (pin === "K" || pin === "R") return 36;
-  return 0;
-}
-
 function gateInputY(node: CircuitNode, inputIndex: number, inputCount: number) {
   const height = node.height ?? 0;
   if (node.type === "NOT") return node.y + height / 2;
@@ -108,7 +102,7 @@ export function getNodePins(node: CircuitNode, inputCount = 2): NodePins {
     };
   }
   if (node.type === "AND" || node.type === "OR") {
-    const inputX = node.type === "OR" ? node.x + 18 : node.x + 2;
+    const inputX = node.x + 2;
     const inputPins = Array.from({ length: Math.max(1, inputCount) }, (_, index) => ({
       x: inputX,
       y: gateInputY(node, index, Math.max(1, inputCount)),
@@ -155,8 +149,10 @@ function gateSize(type: CircuitNode["type"]) {
 function labelBounds(node: CircuitNode): CircuitBounds {
   const width = Math.max(12, node.label.length * 8);
   const explicitLabelX = typeof node.metadata?.labelX === "number" ? node.metadata.labelX : undefined;
+  const explicitLabelY = typeof node.metadata?.labelY === "number" ? node.metadata.labelY : undefined;
   const x = explicitLabelX ?? node.x + 8;
-  return { id: node.id, x, y: node.y - 11, width, height: 14, padding: 0 };
+  const y = explicitLabelY ?? node.y - 11;
+  return { id: node.id, x, y, width, height: 14, padding: 0 };
 }
 
 export function getNodeBounds(node: CircuitNode): CircuitBounds {
@@ -169,6 +165,9 @@ export function getNodeBounds(node: CircuitNode): CircuitBounds {
       height: node.height ?? gateSize(node.type).height,
       padding: obstaclePadding,
     };
+  }
+  if (node.type === "STATE" || node.type === "STATE_NOT") {
+    return { id: node.id, x: node.x, y: node.y, width: 1, height: 1, padding: 0 };
   }
   return labelBounds(node);
 }
@@ -411,6 +410,37 @@ function laneRoute(from: Point, to: Point, laneX: number) {
   return compactPoints([from, { x: laneX, y: from.y }, { x: laneX, y: to.y }, to]);
 }
 
+function edgeInputIndex(edge: CircuitEdge) {
+  return Number(edge.metadata?.gateInputIndex ?? 0);
+}
+
+function ffInputLane(edge: CircuitEdge, from: Point, to: Point) {
+  const pin = edge.toPin ?? String(edge.metadata?.targetPin ?? "");
+  const pinSlot = pin === "K" || pin === "R" ? 2 : pin === "D" || pin === "T" ? 1 : 0;
+  const stateName = String(edge.metadata?.targetState ?? "");
+  const stateIndex = stateName ? Math.max(0, stateName.toUpperCase().charCodeAt(0) - 65) : 0;
+  const equationRank = Math.abs([...String(edge.netId ?? edge.id ?? "")].reduce((sum, character) => sum + character.charCodeAt(0), 0)) % 5;
+  const baseLaneX = pinSlot === 2 ? zone.ffApproachX + 44 : pinSlot === 1 ? zone.ffApproachX + 24 : zone.ffApproachX + 8;
+  const stateOffset = pinSlot === 2 ? -stateIndex * 12 : stateIndex * 8;
+  const laneX = Math.max(zone.ffApproachX + 8, Math.min(zone.ffX - 24, baseLaneX + stateOffset));
+  const laneY = Math.min(from.y, to.y) - 26 - equationRank * 12;
+  return { laneX, laneY };
+}
+
+function routeDirectSignalToOr(from: Point, to: Point, busX: number, toNode: CircuitNode, inputIndex: number, exitX = busX) {
+  const approachX = Math.min(to.x - 28, zone.productX + 136 + inputIndex * 8);
+  const safeY = toNode.y - 34 - inputIndex * 14;
+  return compactPoints([
+    from,
+    { x: exitX, y: from.y },
+    { x: exitX, y: safeY },
+    { x: busX, y: safeY },
+    { x: approachX, y: safeY },
+    { x: approachX, y: to.y },
+    to,
+  ]);
+}
+
 function deterministicRouteEdge(edge: CircuitEdge, nodes: CircuitNode[]) {
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const resolved = resolveEdgeAnchors(edge, nodeById);
@@ -419,7 +449,6 @@ function deterministicRouteEdge(edge: CircuitEdge, nodes: CircuitNode[]) {
   const edgeNetId = edge.netId ?? "";
   const laneIndex = [...edgeNetId].reduce((sum, character) => sum + character.charCodeAt(0), 0) % 9;
   const finalNetLaneX = 784 + laneIndex * 8;
-  const finalNetLaneY = Math.min(from.y, to.y) - 18 - laneIndex * 10;
   const stateSourceNet = fromNode.type === "STATE"
     ? nodeLabelNet(fromNode.label)
     : fromNode.type === "STATE_NOT"
@@ -433,22 +462,32 @@ function deterministicRouteEdge(edge: CircuitEdge, nodes: CircuitNode[]) {
   if ((fromNode.type === "STATE" || fromNode.type === "STATE_NOT") && isGate(toNode)) {
     const laneY = metadataNumber(fromNode, "feedbackLaneY") ?? feedbackLaneY(fromNode);
     const busX = edgeNetId === stateSourceNet ? metadataNumber(fromNode, "busX") ?? zone.busStartX : finalNetLaneX;
+    const feedbackExitX = metadataNumber(fromNode, "feedbackExitX") ?? from.x + 44;
     if (edgeNetId !== stateSourceNet) {
       const exitX = from.x + 26 + laneIndex * 8;
       return compactPoints([from, { x: exitX, y: from.y }, { x: exitX, y: laneY }, { x: busX, y: laneY }, { x: busX, y: to.y }, to]);
     }
-    return compactPoints([from, { x: from.x, y: laneY }, { x: busX, y: laneY }, { x: busX, y: to.y }, to]);
+    return compactPoints([from, { x: feedbackExitX, y: from.y }, { x: feedbackExitX, y: laneY }, { x: busX, y: laneY }, { x: busX, y: to.y }, to]);
   }
 
   if ((fromNode.type === "STATE" || fromNode.type === "STATE_NOT") && toNode.type === "FF") {
-    const exitX = from.x + 26 + laneIndex * 8;
-    return compactPoints([from, { x: exitX, y: from.y }, { x: exitX, y: finalNetLaneY }, { x: finalNetLaneX, y: finalNetLaneY }, { x: finalNetLaneX, y: to.y }, { x: zone.ffApproachX, y: to.y }, to]);
+    const { laneX } = ffInputLane(edge, from, to);
+    const bottomLaneY = Math.max(from.y, to.y, toNode.y + (toNode.height ?? ffHeight)) + 90 + laneIndex * 14;
+    const aliasLaneX = from.x + 86 + laneIndex * 10;
+    return compactPoints([
+      from,
+      { x: from.x, y: bottomLaneY },
+      { x: aliasLaneX, y: bottomLaneY },
+      { x: laneX, y: bottomLaneY },
+      { x: laneX, y: to.y },
+      to,
+    ]);
   }
 
   if ((fromNode.type === "STATE" || fromNode.type === "STATE_NOT") && toNode.type === "OUTPUT") {
     const laneY = metadataNumber(fromNode, "feedbackLaneY") ?? feedbackLaneY(fromNode);
     const busX = metadataNumber(fromNode, "busX") ?? zone.busStartX;
-    const exitX = edgeNetId === stateSourceNet ? from.x : from.x + 26 + laneIndex * 8;
+    const exitX = edgeNetId === stateSourceNet ? metadataNumber(fromNode, "feedbackExitX") ?? from.x + 44 : from.x + 26 + laneIndex * 8;
     return compactPoints([from, { x: exitX, y: from.y }, { x: exitX, y: laneY }, { x: busX, y: laneY }, { x: busX, y: to.y }, to]);
   }
 
@@ -457,13 +496,15 @@ function deterministicRouteEdge(edge: CircuitEdge, nodes: CircuitNode[]) {
   }
 
   if (fromNode.type === "NOT" && toNode.type === "FF") {
-    const staggerY = from.y + 18 + laneIndex * 8;
     const exitX = from.x + 22 + laneIndex * 6;
-    return compactPoints([from, { x: exitX, y: from.y }, { x: exitX, y: staggerY }, { x: finalNetLaneX, y: staggerY }, { x: finalNetLaneX, y: to.y }, { x: zone.ffApproachX, y: to.y }, to]);
+    const { laneX } = ffInputLane(edge, from, to);
+    const topLaneY = Math.min(from.y, to.y) - 64 - laneIndex * 12;
+    return compactPoints([from, { x: from.x, y: topLaneY }, { x: exitX, y: topLaneY }, { x: laneX, y: topLaneY }, { x: laneX, y: to.y }, to]);
   }
 
   if (fromNode.type === "INPUT" && isGate(toNode)) {
     const busX = metadataNumber(fromNode, "busX") ?? Math.min(from.x + 70, to.x - 90);
+    if (toNode.type === "OR") return routeDirectSignalToOr(from, to, busX, toNode, edgeInputIndex(edge));
     return busRoute(from, to, busX);
   }
 
@@ -471,24 +512,32 @@ function deterministicRouteEdge(edge: CircuitEdge, nodes: CircuitNode[]) {
     const busX = edgeNetId === nodeLabelNet(`${String(fromNode.metadata?.source ?? fromNode.label)}'`)
       ? metadataNumber(fromNode, "busX") ?? Math.min(from.x + 70, to.x - 90)
       : finalNetLaneX;
-    const staggerY = from.y + 18 + laneIndex * 8;
-    return compactPoints([from, { x: from.x, y: staggerY }, { x: busX, y: staggerY }, { x: busX, y: to.y }, to]);
+    const staggerY = from.y + 24 + laneIndex * 10;
+    const exitX = from.x + 20 + edgeInputIndex(edge) * 8;
+    if (toNode.type === "OR") return routeDirectSignalToOr(from, to, busX, toNode, edgeInputIndex(edge), exitX);
+    return compactPoints([from, { x: exitX, y: from.y }, { x: exitX, y: staggerY }, { x: busX, y: staggerY }, { x: busX, y: to.y }, to]);
   }
 
   if (isGate(fromNode) && isGate(toNode)) {
     const laneX = fromNode.type === "AND" && toNode.type === "OR"
-      ? zone.gateToGateLaneX
+      ? zone.productX + 92 + edgeInputIndex(edge) * 26
       : Math.round((from.x + to.x) / 2);
     return laneRoute(from, to, laneX);
   }
 
   if (isGate(fromNode) && fromNode.type !== "NOT" && toNode.type === "FF") {
-    return laneRoute(from, to, zone.ffApproachX);
+    const { laneX } = ffInputLane(edge, from, to);
+    return laneRoute(from, to, laneX);
   }
 
   if (fromNode.type === "INPUT" && toNode.type === "FF") {
-    const busX = finalNetLaneX;
-    return compactPoints([from, { x: busX, y: from.y }, { x: busX, y: to.y }, { x: zone.ffApproachX, y: to.y }, to]);
+    const { laneX } = ffInputLane(edge, from, to);
+    const targetPin = edge.toPin ?? String(edge.metadata?.targetPin ?? "");
+    const useBottomLane = targetPin === "K" || targetPin === "R";
+    const aliasLaneY = useBottomLane
+      ? Math.max(from.y, to.y) + 76 + laneIndex * 12
+      : Math.min(from.y, to.y) - 72 - laneIndex * 12;
+    return compactPoints([from, { x: from.x, y: aliasLaneY }, { x: laneX, y: aliasLaneY }, { x: laneX, y: to.y }, to]);
   }
 
   if (isGate(fromNode) && toNode.type === "OUTPUT") {
@@ -497,6 +546,15 @@ function deterministicRouteEdge(edge: CircuitEdge, nodes: CircuitNode[]) {
 
   if ((fromNode.type === "INPUT" || fromNode.type === "NOT") && toNode.type === "OUTPUT") {
     const busX = metadataNumber(fromNode, "busX") ?? Math.min(from.x + 70, to.x - 80);
+    const sourceNet = fromNode.type === "INPUT"
+      ? nodeLabelNet(fromNode.label)
+      : nodeLabelNet(`${String(fromNode.metadata?.source ?? fromNode.label)}'`);
+    if (edgeNetId !== sourceNet) {
+      const sourceRailX = from.x - 28 - laneIndex * 8;
+      const aliasLaneY = Math.min(from.y, to.y) - 100 - laneIndex * 14;
+      const outputLaneX = to.x - 44 - laneIndex * 8;
+      return compactPoints([from, { x: sourceRailX, y: from.y }, { x: sourceRailX, y: aliasLaneY }, { x: outputLaneX, y: aliasLaneY }, { x: outputLaneX, y: to.y }, to]);
+    }
     return compactPoints([from, { x: busX, y: from.y }, { x: busX, y: to.y }, to]);
   }
 
@@ -599,8 +657,10 @@ export function validateCircuitGraph(graph: CircuitGraph) {
   for (const state of graph.metadata.stateVariables) {
     const qEdge = graph.edges.find((edge) => edge.from === `ff:${state}` && edge.to === `state:${state}` && edge.fromPin === "Q");
     const qBarEdge = graph.edges.find((edge) => edge.from === `ff:${state}` && edge.to === `state-not:${state}` && edge.fromPin === "Q'");
-    if (qEdge?.netId !== nodeLabelNet(state)) errors.push(`FF_${state}.Q must drive net ${state}, got ${qEdge?.netId ?? "missing"}.`);
-    if (qBarEdge?.netId !== nodeLabelNet(`${state}'`)) errors.push(`FF_${state}.Q' must drive net ${state}', got ${qBarEdge?.netId ?? "missing"}.`);
+    const usesQ = graph.edges.some((edge) => edge.from === `state:${state}`);
+    const usesQBar = graph.edges.some((edge) => edge.from === `state-not:${state}`);
+    if (usesQ && qEdge?.netId !== nodeLabelNet(state)) errors.push(`FF_${state}.Q must drive net ${state}, got ${qEdge?.netId ?? "missing"}.`);
+    if (usesQBar && qBarEdge?.netId !== nodeLabelNet(`${state}'`)) errors.push(`FF_${state}.Q' must drive net ${state}', got ${qBarEdge?.netId ?? "missing"}.`);
   }
 
   for (const edge of graph.edges) {
@@ -652,6 +712,17 @@ export function validateCircuitGraph(graph: CircuitGraph) {
     }
   }
 
+  const componentBounds = graph.nodes
+    .filter((node) => node.type === "AND" || node.type === "OR" || node.type === "NOT" || node.type === "FF")
+    .map((node) => expandBounds(getNodeBounds(node), 4));
+  for (const edge of graph.edges) {
+    const points = pointsFromFlat(edge.points);
+    const activeBounds = componentBounds.filter((bounds) => bounds.id !== edge.from && bounds.id !== edge.to);
+    if (pathIntersectsObstacles(points, activeBounds)) {
+      errors.push(`Wire ${edge.wireId ?? edge.id ?? `${edge.from}->${edge.to}`} crosses a component body.`);
+    }
+  }
+
   for (const edge of graph.edges) {
     if (edge.netId === "CLK") errors.push(`CLK net must use clock bus only, but edge ${edge.id ?? edge.wireId} is a logic wire.`);
   }
@@ -684,8 +755,8 @@ export function layoutCircuitGraph(graph: CircuitGraph): CircuitGraph {
   };
   const pinOrder = pinOrderByType[next.metadata.flipFlopType] ?? ["J", "K"];
   const signalTracks = [
-    ...next.metadata.inputVariables.flatMap((input) => [input, `${input}'`]),
     ...next.metadata.stateVariables.flatMap((state) => [state, `${state}'`]),
+    ...next.metadata.inputVariables.flatMap((input) => [input, `${input}'`]),
   ];
   const busXBySignal = new Map(signalTracks.map((signal, index) => [signal, zone.busStartX + index * zone.busTrackStep]));
   const targetStartY = Math.max(layoutTop, feedbackTopY + next.metadata.stateVariables.length * 2 * feedbackLaneStep + 86);
@@ -702,19 +773,45 @@ export function layoutCircuitGraph(graph: CircuitGraph): CircuitGraph {
     return next.metadata.stateVariables.length * 10 + (outputIndex < 0 ? 99 : outputIndex);
   };
   targetEdges.sort((a, b) => targetRank(a) - targetRank(b));
+  const productTermCountForTarget = (edge: CircuitEdge) => {
+    const sourceNode = nodeById.get(edge.from);
+    if (!sourceNode) return 1;
+    if (sourceNode.type === "OR") {
+      const incomingProducts = next.edges.filter((candidate) => {
+        const candidateSource = nodeById.get(candidate.from);
+        return candidate.to === sourceNode.id && candidateSource?.type === "AND";
+      }).length;
+      return Math.max(1, incomingProducts);
+    }
+    if (sourceNode.type === "AND") return 1;
+    return 1;
+  };
   const slotYByTargetEdge = new Map<string, number>();
-  targetEdges.forEach((edge, index) => slotYByTargetEdge.set(edge.id ?? `${edge.from}->${edge.to}`, targetStartY + index * targetSpacing));
+  let targetCursorY = targetStartY;
+  targetEdges.forEach((edge) => {
+    const productCount = productTermCountForTarget(edge);
+    const groupHalfHeight = Math.max(targetSpacing / 2, ((productCount - 1) * termSpacing) / 2 + 58);
+    const slotY = targetCursorY + groupHalfHeight;
+    slotYByTargetEdge.set(edge.id ?? `${edge.from}->${edge.to}`, slotY);
+    targetCursorY = slotY + groupHalfHeight + 56;
+  });
 
   next.metadata.inputVariables.forEach((input, index) => {
     const inputY = targetStartY - 76 + index * 44;
     const inputNode = nodeById.get(`input:${input}`);
     if (inputNode) {
+      const busX = zone.inputX + 54 + index * 28;
       Object.assign(inputNode, {
         x: zone.inputX,
         y: inputY,
         width: 1,
         height: 1,
-        metadata: { ...inputNode.metadata, busX: zone.inputX + 54 + index * 28 },
+        metadata: {
+          ...inputNode.metadata,
+          busX,
+          labelX: busX - 34,
+          labelY: inputY - 8,
+        },
       });
     }
     const notNode = nodeById.get(`not:${input}`);
@@ -751,34 +848,39 @@ export function layoutCircuitGraph(graph: CircuitGraph): CircuitGraph {
     const qBarY = placement.y + 90;
     const stateNode = nodeById.get(`state:${state}`);
     const stateNotNode = nodeById.get(`state-not:${state}`);
-    const labelX = zone.feedbackBusX + next.metadata.stateVariables.length * 56 + 88;
+    const stateX = zone.feedbackBusX + stateIndex * 56;
+    const stateNotX = stateX + 24;
+    const stateBusX = busXBySignal.get(state) ?? zone.busStartX;
+    const stateNotBusX = busXBySignal.get(`${state}'`) ?? zone.busStartX;
+    const stateLaneY = feedbackTopY + stateIndex * 2 * feedbackLaneStep;
+    const stateNotLaneY = feedbackTopY + (stateIndex * 2 + 1) * feedbackLaneStep;
     if (stateNode) {
       Object.assign(stateNode, {
-        x: zone.feedbackBusX + stateIndex * 56,
+        x: stateX,
         y: qY,
         width: 1,
         height: 1,
         metadata: {
           ...stateNode.metadata,
-          busX: busXBySignal.get(state) ?? zone.busStartX,
+          busX: stateBusX,
+          feedbackExitX: stateX + 44,
           feedbackLane: stateIndex * 2,
-          feedbackLaneY: feedbackTopY + stateIndex * 2 * feedbackLaneStep,
-          labelX,
+          feedbackLaneY: stateLaneY,
         },
       });
     }
     if (stateNotNode) {
       Object.assign(stateNotNode, {
-        x: zone.feedbackBusX + stateIndex * 56 + 24,
+        x: stateNotX,
         y: qBarY,
         width: 1,
         height: 1,
         metadata: {
           ...stateNotNode.metadata,
-          busX: busXBySignal.get(`${state}'`) ?? zone.busStartX,
+          busX: stateNotBusX,
+          feedbackExitX: stateNotX + 44,
           feedbackLane: stateIndex * 2 + 1,
-          feedbackLaneY: feedbackTopY + (stateIndex * 2 + 1) * feedbackLaneStep,
-          labelX,
+          feedbackLaneY: stateNotLaneY,
         },
       });
     }
@@ -1093,9 +1195,10 @@ function svgNodeLabels(node: CircuitNode) {
       `<text x="${node.x + 48}" y="${node.y + 143}" font-size="13" fill="#334155">CLK</text>`,
     ].join("");
   }
-  if (node.type === "AND" || node.type === "OR" || node.type === "NOT") return "";
+  if (node.type === "AND" || node.type === "OR" || node.type === "NOT" || node.type === "STATE" || node.type === "STATE_NOT") return "";
   const labelX = typeof node.metadata?.labelX === "number" ? node.metadata.labelX : node.x + 8;
-  return svgFormulaText(labelX, node.y - 11, node.label, 13);
+  const labelY = typeof node.metadata?.labelY === "number" ? node.metadata.labelY : node.y - 11;
+  return svgFormulaText(labelX, labelY, node.label, 13);
 }
 
 function svgRoutingBounds(bounds: CircuitBounds[]) {

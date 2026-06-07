@@ -110,8 +110,10 @@ function GateBody({ node }: { node: CircuitNode }) {
 function NodeLabel({ node }: { node: CircuitNode }) {
   if (node.type === "FF") return <FlipFlopLabels node={node} />;
   if (node.type === "AND" || node.type === "OR" || node.type === "NOT") return null;
+  if (node.type === "STATE" || node.type === "STATE_NOT") return null;
   const labelX = typeof node.metadata?.labelX === "number" ? node.metadata.labelX : node.x + 8;
-  return <FormulaText x={labelX} y={node.y - 11} label={node.label} size={13} />;
+  const labelY = typeof node.metadata?.labelY === "number" ? node.metadata.labelY : node.y - 11;
+  return <FormulaText x={labelX} y={labelY} label={node.label} size={13} />;
 }
 
 function RoutingBounds({ bounds }: { bounds: CircuitBounds[] }) {

@@ -80,8 +80,6 @@ let gateCounter = 0;
       ...makeNode(`ff:${state}`, "FF", state, { state }),
       flipFlopType,
     });
-    addEdge({ from: `ff:${state}`, to: `state:${state}`, fromPin: "Q", netId: netIdForSignal(state) });
-    addEdge({ from: `ff:${state}`, to: `state-not:${state}`, fromPin: "Q'", netId: netIdForSignal(`${state}'`) });
   }
 
   function sourceForVariable(name: string) {
@@ -166,6 +164,13 @@ let gateCounter = 0;
         metadata: { ...targetMetadata, outputNetId: equationNetId },
       });
     }
+  }
+
+  for (const state of variables.states) {
+    const usesQ = edges.some((edge) => edge.from === `state:${state}`);
+    const usesQBar = edges.some((edge) => edge.from === `state-not:${state}`);
+    if (usesQ) addEdge({ from: `ff:${state}`, to: `state:${state}`, fromPin: "Q", netId: netIdForSignal(state) });
+    if (usesQBar) addEdge({ from: `ff:${state}`, to: `state-not:${state}`, fromPin: "Q'", netId: netIdForSignal(`${state}'`) });
   }
 
   return {
