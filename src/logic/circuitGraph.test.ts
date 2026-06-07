@@ -361,7 +361,23 @@ describe("boolean parser", () => {
   });
 
   it("supports variables, complements, products, sums, and grouping", () => {
-    const expressions = ["A", "A'", "B", "B'", "X", "X'", "AB", "A B", "A + B", "A'B + AB'", "(A + B)C", "A'B'C + AB"];
+    const expressions = [
+      "A",
+      "A'",
+      "!A",
+      "NOT(A)",
+      "B",
+      "B'",
+      "X",
+      "X'",
+      "AB",
+      "A B",
+      "A' · X",
+      "A + B",
+      "A'B + AB'",
+      "(A + B)C",
+      "A'B'C + AB",
+    ];
     for (const expression of expressions) expect(() => parseBooleanEquation(expression)).not.toThrow();
   });
 });
@@ -491,6 +507,79 @@ describe("circuit graph generation", () => {
     expect(graph.edges.some((edge) => edge.from === "ff:A" && edge.to === "state-not:A" && edge.fromPin === "Q'")).toBe(false);
     expect(graph.edges.some((edge) => edge.from === "ff:B" && edge.to === "state:B" && edge.fromPin === "Q")).toBe(true);
     expect(graph.edges.some((edge) => edge.from === "ff:B" && edge.to === "state-not:B" && edge.fromPin === "Q'")).toBe(false);
+  });
+
+  it("fans out shared JK flip-flop input expressions without net conflicts", () => {
+    const graph = buildAndLayout("jk", ["A", "B"], {
+      J_A: "B",
+      K_A: "X'",
+      J_B: "A'X + AX'",
+      K_B: "X'",
+      Z: "A'BX' + AB' + AX",
+    });
+    const kEdges = graph.edges.filter((edge) => edge.to.startsWith("ff:") && edge.toPin === "K");
+
+    expect(graph.metadata.validationErrors ?? []).toEqual([]);
+    expect(kEdges).toHaveLength(2);
+    expect(new Set(kEdges.map((edge) => edge.netId))).toEqual(new Set(["XNOT"]));
+  });
+
+  it("fans out shared D flip-flop input expressions without net conflicts", () => {
+    const graph = buildAndLayout("d", ["A", "B"], {
+      D_A: "X'",
+      D_B: "X'",
+      Z: "A + B",
+    });
+    const dEdges = graph.edges.filter((edge) => edge.to.startsWith("ff:") && edge.toPin === "D");
+
+    expect(graph.metadata.validationErrors ?? []).toEqual([]);
+    expect(dEdges).toHaveLength(2);
+    expect(new Set(dEdges.map((edge) => edge.netId))).toEqual(new Set(["XNOT"]));
+  });
+
+  it("fans out shared T flip-flop input expressions without net conflicts", () => {
+    const graph = buildAndLayout("t", ["A", "B"], {
+      T_A: "A'X",
+      T_B: "X A'",
+      Z: "AX + B",
+    });
+    const tEdges = graph.edges.filter((edge) => edge.to.startsWith("ff:") && edge.toPin === "T");
+
+    expect(graph.metadata.validationErrors ?? []).toEqual([]);
+    expect(tEdges).toHaveLength(2);
+    expect(new Set(tEdges.map((edge) => edge.netId)).size).toBe(1);
+  });
+
+  it("fans out shared SR flip-flop input expressions without net conflicts", () => {
+    const graph = buildAndLayout("sr", ["A", "B"], {
+      S_A: "X + B",
+      S_B: "B + X",
+      R_A: "X'",
+      R_B: "!X",
+      Z: "AB",
+    });
+    const sEdges = graph.edges.filter((edge) => edge.to.startsWith("ff:") && edge.toPin === "S");
+    const rEdges = graph.edges.filter((edge) => edge.to.startsWith("ff:") && edge.toPin === "R");
+
+    expect(graph.metadata.validationErrors ?? []).toEqual([]);
+    expect(sEdges).toHaveLength(2);
+    expect(rEdges).toHaveLength(2);
+    expect(new Set(sEdges.map((edge) => edge.netId)).size).toBe(1);
+    expect(new Set(rEdges.map((edge) => edge.netId))).toEqual(new Set(["XNOT"]));
+  });
+
+  it("fans out shared complements across three D flip-flop inputs", () => {
+    const graph = buildAndLayout("d", ["A", "B", "C"], {
+      D_A: "X'",
+      D_B: "!X",
+      D_C: "NOT(X)",
+      Z: "A + B + C",
+    });
+    const dEdges = graph.edges.filter((edge) => edge.to.startsWith("ff:") && edge.toPin === "D");
+
+    expect(graph.metadata.validationErrors ?? []).toEqual([]);
+    expect(dEdges).toHaveLength(3);
+    expect(new Set(dEdges.map((edge) => edge.netId))).toEqual(new Set(["XNOT"]));
   });
 
   it("exports complete SVG wires with debug attributes", () => {

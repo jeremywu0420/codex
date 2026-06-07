@@ -4,6 +4,7 @@ import { ExportButton } from "./components/ExportButton";
 import { KMapViewer } from "./components/KMapViewer";
 import { Selectors } from "./components/Selectors";
 import { StateTableEditor } from "./components/StateTableEditor";
+import { TimingDiagramPanel } from "./components/TimingDiagramPanel";
 import { useCircuitStore } from "./store/useCircuitStore";
 
 export default function App() {
@@ -47,6 +48,8 @@ export default function App() {
               <ExportButton />
             </div>
             <CircuitDiagram />
+            <div className="output-tab">OUTPUT 3: TIMING DIAGRAM / CLOCK WAVEFORM</div>
+            <TimingDiagramPanel />
           </section>
         </div>
       </div>

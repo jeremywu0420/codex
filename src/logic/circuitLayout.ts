@@ -473,11 +473,12 @@ function deterministicRouteEdge(edge: CircuitEdge, nodes: CircuitNode[]) {
   if ((fromNode.type === "STATE" || fromNode.type === "STATE_NOT") && toNode.type === "FF") {
     const { laneX } = ffInputLane(edge, from, to);
     const bottomLaneY = Math.max(from.y, to.y, toNode.y + (toNode.height ?? ffHeight)) + 90 + laneIndex * 14;
-    const aliasLaneX = from.x + 86 + laneIndex * 10;
+    const sourceIsStateNet = edgeNetId === stateSourceNet;
+    const exitX = sourceIsStateNet ? metadataNumber(fromNode, "feedbackExitX") ?? from.x + 44 : from.x + 86 + laneIndex * 10;
     return compactPoints([
       from,
-      { x: from.x, y: bottomLaneY },
-      { x: aliasLaneX, y: bottomLaneY },
+      { x: exitX, y: from.y },
+      { x: exitX, y: bottomLaneY },
       { x: laneX, y: bottomLaneY },
       { x: laneX, y: to.y },
       to,
@@ -526,8 +527,8 @@ function deterministicRouteEdge(edge: CircuitEdge, nodes: CircuitNode[]) {
   }
 
   if (isGate(fromNode) && fromNode.type !== "NOT" && toNode.type === "FF") {
-    const { laneX } = ffInputLane(edge, from, to);
-    return laneRoute(from, to, laneX);
+    const { laneX, laneY } = ffInputLane(edge, from, to);
+    return compactPoints([from, { x: from.x, y: laneY }, { x: laneX, y: laneY }, { x: laneX, y: to.y }, to]);
   }
 
   if (fromNode.type === "INPUT" && toNode.type === "FF") {
@@ -620,8 +621,9 @@ export function routeOrthogonalEdge(edge: CircuitEdge, nodes: CircuitNode[], obs
   return selectRoute.fallback() ?? pathWithChannel(from, to, fromNode, toNode, channels[0] ?? Math.min(from.y, to.y) - routingChannelY);
 }
 
-function routeEdges(edges: CircuitEdge[], nodes: CircuitNode[], _rawBounds: CircuitBounds[]) {
+function routeEdges(edges: CircuitEdge[], nodes: CircuitNode[], rawBounds: CircuitBounds[]) {
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const usedSegments: Segment[] = [];
   for (const edge of edges) {
     const resolved = resolveEdgeAnchors(edge, nodeById);
     if (resolved) {
@@ -629,14 +631,20 @@ function routeEdges(edges: CircuitEdge[], nodes: CircuitNode[], _rawBounds: Circ
       edge.targetAnchor = resolved.targetAnchor;
     }
     edge.wireId = makeWireId(edge);
-    const routedPoints = deterministicRouteEdge(edge, nodes);
+    const deterministicPoints = deterministicRouteEdge(edge, nodes);
+    const activeBounds = resolved ? rawBounds.filter((bounds) => bounds.id !== resolved.fromNode.id && bounds.id !== resolved.toNode.id) : rawBounds;
+    const routedPoints = pathIntersectsObstacles(deterministicPoints, activeBounds)
+      ? routeOrthogonalEdge(edge, nodes, rawBounds, usedSegments)
+      : deterministicPoints;
     edge.points = flattenPoints(routedPoints);
+    usedSegments.push(
+      ...pointsToSegments(routedPoints).map((segment) => ({
+        ...segment,
+        signalId: edge.netId ?? edge.from,
+      })),
+    );
     validateWire(edge);
   }
-}
-
-function normalizedEquationNet(label: string) {
-  return label.replace(/_/g, "").toUpperCase();
 }
 
 function nodeLabelNet(label: string) {
@@ -661,18 +669,6 @@ export function validateCircuitGraph(graph: CircuitGraph) {
     const usesQBar = graph.edges.some((edge) => edge.from === `state-not:${state}`);
     if (usesQ && qEdge?.netId !== nodeLabelNet(state)) errors.push(`FF_${state}.Q must drive net ${state}, got ${qEdge?.netId ?? "missing"}.`);
     if (usesQBar && qBarEdge?.netId !== nodeLabelNet(`${state}'`)) errors.push(`FF_${state}.Q' must drive net ${state}', got ${qBarEdge?.netId ?? "missing"}.`);
-  }
-
-  for (const edge of graph.edges) {
-    const target = splitTarget(edge);
-    if (target?.kind === "ff") {
-      const expectedNet = normalizedEquationNet(`${target.pin}_${target.state}`);
-      if (edge.netId !== expectedNet) errors.push(`FF_${target.state}.${target.pin} must connect to ${expectedNet}, got ${edge.netId ?? "missing"}.`);
-    }
-    if (target?.kind === "output") {
-      const expectedNet = normalizedEquationNet(target.output);
-      if (edge.netId !== expectedNet) errors.push(`Output ${target.output} must connect to ${expectedNet}, got ${edge.netId ?? "missing"}.`);
-    }
   }
 
   for (const output of graph.metadata.outputVariables) {

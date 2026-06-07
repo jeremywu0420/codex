@@ -3,5 +3,15 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
-  base:'/codex/',
+  base: "/codex/",
+  server: {
+    host: "0.0.0.0",
+    port: 5174,
+    strictPort: true,
+  },
+  preview: {
+    host: "0.0.0.0",
+    port: 5174,
+    strictPort: true,
+  },
 });

@@ -3,7 +3,7 @@ import type Konva from "konva";
 import { Circle, Group, Layer, Line, Path, Rect, Stage, Text } from "react-konva";
 import { circuitGraphToSvg, collectWireJunctionDots, expandBounds, getCircuitContentBounds, layoutCircuitGraph } from "../logic/circuitLayout";
 import { useCircuitStore } from "../store/useCircuitStore";
-import type { CircuitBounds, CircuitGraph, CircuitNode, FlipFlopType } from "../types";
+import type { CircuitBounds, CircuitGraph, CircuitNode, Equation, FlipFlopType } from "../types";
 
 const wire = "#64748b";
 const ink = "#334155";
@@ -201,6 +201,83 @@ function RenderCircuitDiagram({ graph, showRoutingBounds = false }: { graph: Cir
   );
 }
 
+function edgeDestination(edge: CircuitGraph["edges"][number]) {
+  const targetState = edge.metadata?.targetState;
+  const targetPin = edge.toPin ?? edge.metadata?.targetPin;
+  const targetOutput = edge.metadata?.targetOutput;
+  if (typeof targetState === "string" && typeof targetPin === "string") return `FF_${targetState}.${targetPin}`;
+  if (typeof targetOutput === "string") return `OUTPUT_${targetOutput}`;
+  if (edge.toPin) return `${edge.to}.${edge.toPin}`;
+  if (typeof edge.metadata?.gateInputIndex === "number") return `${edge.to}.in${edge.metadata.gateInputIndex}`;
+  return `${edge.to}${edge.toPin ? `.${edge.toPin}` : ""}`;
+}
+
+function debugRoutingLane(netId?: string) {
+  if (!netId) return "";
+  return [...netId].reduce((sum, character) => sum + character.charCodeAt(0), 0) % 9;
+}
+
+function logCircuitGenerationDebug(graph: CircuitGraph, equations: Equation[], flipFlopType: FlipFlopType) {
+  const targetEdges = graph.edges.filter((edge) => edge.metadata?.targetKind === "ff" || edge.metadata?.targetKind === "output");
+  const targetByLabel = new Map(targetEdges.map((edge) => [String(edge.metadata?.equationLabel ?? edge.label ?? ""), edge]));
+  const netRows = [...new Set(graph.edges.map((edge) => edge.netId).filter(Boolean))]
+    .map((netId) => {
+      const netEdges = graph.edges.filter((edge) => edge.netId === netId);
+      return {
+        netId,
+        source: [...new Set(netEdges.map((edge) => edge.from))].join(", "),
+        destinations: netEdges.map(edgeDestination).join(", "),
+        fanOut: netEdges.length,
+        routingLane: debugRoutingLane(netId),
+      };
+    });
+  const expressionRows = graph.nodes
+    .filter((node) => node.type === "AND" || node.type === "OR" || node.type === "NOT")
+    .map((node) => {
+      const outputNet = String(node.metadata?.outputNetId ?? "");
+      return {
+        canonicalExpressionKey: node.metadata?.canonicalExpressionKey ?? "",
+        node: node.id,
+        outputNet,
+        routingLane: debugRoutingLane(outputNet),
+        destinations: graph.edges.filter((edge) => edge.from === node.id && edge.netId === outputNet).map(edgeDestination).join(", "),
+        fanoutCount: graph.edges.filter((edge) => edge.from === node.id && edge.netId === outputNet).length,
+      };
+    })
+    .filter((row) => row.canonicalExpressionKey || row.fanoutCount > 1);
+
+  console.groupCollapsed("Circuit generation debug");
+  console.log("flip-flop type", flipFlopType);
+  console.table(
+    equations.map((equation) => {
+      const targetEdge = targetByLabel.get(equation.label);
+      return {
+        label: equation.label,
+        expression: equation.expression,
+        canonicalExpressionKey: targetEdge?.metadata?.canonicalExpressionKey ?? "",
+        outputNet: targetEdge?.netId ?? "",
+      };
+    }),
+  );
+  console.log("Expression registry");
+  console.table(expressionRows);
+  console.table(
+    graph.nodes
+      .filter((node) => node.type === "AND" || node.type === "OR" || node.type === "NOT")
+      .map((node) => ({
+        node: node.id,
+        type: node.type,
+        outputNet: node.metadata?.outputNetId ?? "",
+        routingLane: debugRoutingLane(String(node.metadata?.outputNetId ?? "")),
+        canonicalExpressionKey: node.metadata?.canonicalExpressionKey ?? "",
+      })),
+  );
+  console.log("Net fan-out");
+  console.table(netRows);
+  console.log("validation result", graph.metadata.validationErrors?.length ? graph.metadata.validationErrors : "OK");
+  console.groupEnd();
+}
+
 type CircuitDiagramProps = {
   showRoutingBounds?: boolean;
 };
@@ -242,6 +319,7 @@ export function CircuitDiagram({ showRoutingBounds = false }: CircuitDiagramProp
     setIsLoading(true);
     await Promise.resolve();
     const layoutedGraph = layoutCircuitGraph(circuitGraph);
+    logCircuitGenerationDebug(layoutedGraph, equations, flipFlopType);
     if (layoutedGraph.metadata.validationErrors?.length) {
       setGraph(null);
       setError(`Circuit validation failed:\n${layoutedGraph.metadata.validationErrors.join("\n")}`);

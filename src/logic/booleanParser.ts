@@ -8,7 +8,7 @@ export type BooleanAst =
 type Token =
   | { type: "VAR"; value: string }
   | { type: "CONST"; value: "0" | "1" }
-  | { type: "PLUS" | "APOSTROPHE" | "LPAREN" | "RPAREN" };
+  | { type: "PLUS" | "AND" | "APOSTROPHE" | "BANG" | "NOT" | "LPAREN" | "RPAREN" };
 
 function tokenize(input: string): Token[] {
   const tokens: Token[] = [];
@@ -22,6 +22,16 @@ function tokenize(input: string): Token[] {
     }
     if (char === "+") {
       tokens.push({ type: "PLUS" });
+      index += 1;
+      continue;
+    }
+    if (char === "*" || char === "·") {
+      tokens.push({ type: "AND" });
+      index += 1;
+      continue;
+    }
+    if (char === "!") {
+      tokens.push({ type: "BANG" });
       index += 1;
       continue;
     }
@@ -46,6 +56,13 @@ function tokenize(input: string): Token[] {
       continue;
     }
     if (/[A-Za-z]/.test(char)) {
+      const maybeNot = input.slice(index, index + 3);
+      const next = input[index + 3];
+      if (maybeNot.toUpperCase() === "NOT" && (!next || /[^A-Za-z0-9]/.test(next))) {
+        tokens.push({ type: "NOT" });
+        index += 3;
+        continue;
+      }
       let name = char;
       index += 1;
       while (index < input.length && /[0-9]/.test(input[index])) {
@@ -77,7 +94,7 @@ export function parseBooleanEquation(input: string): BooleanAst {
   }
 
   function startsFactor(token: Token | undefined) {
-    return token?.type === "VAR" || token?.type === "CONST" || token?.type === "LPAREN";
+    return token?.type === "VAR" || token?.type === "CONST" || token?.type === "LPAREN" || token?.type === "BANG" || token?.type === "NOT";
   }
 
   function parsePrimary(): BooleanAst {
@@ -100,7 +117,15 @@ export function parseBooleanEquation(input: string): BooleanAst {
     throw new Error(`Unexpected token ${token.type}`);
   }
 
-  function parsePostfix(): BooleanAst {
+  function parseFactor(): BooleanAst {
+    if (peek()?.type === "BANG") {
+      consume("BANG");
+      return { type: "NOT", value: parseFactor() };
+    }
+    if (peek()?.type === "NOT") {
+      consume("NOT");
+      return { type: "NOT", value: parseFactor() };
+    }
     let node = parsePrimary();
     while (peek()?.type === "APOSTROPHE") {
       consume("APOSTROPHE");
@@ -110,8 +135,11 @@ export function parseBooleanEquation(input: string): BooleanAst {
   }
 
   function parseProduct(): BooleanAst {
-    const terms: BooleanAst[] = [parsePostfix()];
-    while (startsFactor(peek())) terms.push(parsePostfix());
+    const terms: BooleanAst[] = [parseFactor()];
+    while (peek()?.type === "AND" || startsFactor(peek())) {
+      if (peek()?.type === "AND") consume("AND");
+      terms.push(parseFactor());
+    }
     return terms.length === 1 ? terms[0] : { type: "AND", terms };
   }
 
