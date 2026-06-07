@@ -5,10 +5,12 @@ import {
   circuitGraphToSvg,
   collectWireJunctionDots,
   expandBounds,
+  getCircuitContentBounds,
   getNodeBounds,
   layoutCircuitGraph,
   pathIntersectsObstacles,
   pointsToSegments,
+  segmentIntersectsBounds,
   segmentsOverlap,
 } from "./circuitLayout";
 import type { FlipFlopType, Variables } from "../types";
@@ -44,6 +46,7 @@ const circuitFixtures: Array<{
       KB: "AC",
       JC: "A'B",
       KC: "A + B",
+      Z: "A + B + C",
     },
     expectedPins: ["J", "K"],
   },
@@ -54,6 +57,7 @@ const circuitFixtures: Array<{
     equations: {
       DA: "A'B + AB'",
       DB: "A + B",
+      Z: "A + B",
     },
     expectedPins: ["D"],
   },
@@ -64,6 +68,7 @@ const circuitFixtures: Array<{
     equations: {
       TA: "B",
       TB: "A",
+      Z: "A + B",
     },
     expectedPins: ["T"],
   },
@@ -76,6 +81,7 @@ const circuitFixtures: Array<{
       RA: "AB'",
       SB: "A",
       RB: "B'",
+      Z: "A + B",
     },
     expectedPins: ["S", "R"],
   },
@@ -109,6 +115,23 @@ function expectNoWireObstacleCollisions(graph: ReturnType<typeof buildAndLayout>
   }
 }
 
+function expectAllWiresAreOrthogonal(graph: ReturnType<typeof buildAndLayout>) {
+  for (const edge of graph.edges) {
+    const points = toPointArray(edge.points ?? []);
+    for (const segment of pointsToSegments(points)) {
+      expect(segment.from.x === segment.to.x || segment.from.y === segment.to.y, edge.id).toBe(true);
+    }
+  }
+  for (const segment of pointsToSegments(toPointArray(graph.clockLine.points))) {
+    expect(segment.from.x === segment.to.x || segment.from.y === segment.to.y, "CLK").toBe(true);
+  }
+  for (const branch of graph.clockLine.branches) {
+    for (const segment of pointsToSegments(toPointArray(branch))) {
+      expect(segment.from.x === segment.to.x || segment.from.y === segment.to.y, "CLK branch").toBe(true);
+    }
+  }
+}
+
 function expectStateOutputBusesArePinned(graph: ReturnType<typeof buildAndLayout>, states: string[]) {
   for (const state of states) {
     const qEdge = graph.edges.find((edge) => edge.from === `ff:${state}` && edge.to === `state:${state}`);
@@ -116,6 +139,12 @@ function expectStateOutputBusesArePinned(graph: ReturnType<typeof buildAndLayout
     expect(qEdge?.sourceAnchor?.y, `Q bus ${state}`).toBe(qEdge?.targetAnchor?.y);
     expect(qBarEdge?.sourceAnchor?.y, `Qbar bus ${state}`).toBe(qBarEdge?.targetAnchor?.y);
     expect(qBarEdge?.sourceAnchor?.x, `Qbar source ${state}`).toBeLessThan(qBarEdge?.targetAnchor?.x ?? 0);
+  }
+}
+
+function expectAllEdgesHaveNetIds(graph: ReturnType<typeof buildAndLayout>) {
+  for (const edge of graph.edges) {
+    expect(edge.netId, edge.id).toBeTruthy();
   }
 }
 
@@ -149,9 +178,11 @@ function expectFeedbackLanesAreSeparated(graph: ReturnType<typeof buildAndLayout
 }
 
 function expectNoFullyOverlappedWireSegments(graph: ReturnType<typeof buildAndLayout>) {
-  const routedSegments = graph.edges.flatMap((edge) =>
-    pointsToSegments(toPointArray(edge.points ?? [])).map((segment) => ({ ...segment, signalId: edge.from, wireId: edge.wireId ?? edge.id })),
-  );
+  const routedSegments = graph.edges
+    .filter((edge) => !edge.from.startsWith("state:") && !edge.from.startsWith("state-not:"))
+    .flatMap((edge) =>
+      pointsToSegments(toPointArray(edge.points ?? [])).map((segment) => ({ ...segment, signalId: edge.from, wireId: edge.wireId ?? edge.id })),
+    );
 
   for (let index = 0; index < routedSegments.length; index += 1) {
     for (let otherIndex = index + 1; otherIndex < routedSegments.length; otherIndex += 1) {
@@ -220,6 +251,96 @@ function expectGateOutputWiresStartInsideBodies(graph: ReturnType<typeof buildAn
   }
 }
 
+function expectStateVariablesComeOnlyFromFlipFlops(graph: ReturnType<typeof buildAndLayout>, states: string[]) {
+  for (const state of states) {
+    expect(graph.nodes.some((node) => node.id === `input:${state}`), `${state} standalone input`).toBe(false);
+    expect(graph.nodes.some((node) => node.id === `input:${state}'`), `${state}' standalone input`).toBe(false);
+    expect(graph.edges.some((edge) => edge.from === `ff:${state}` && edge.to === `state:${state}` && edge.fromPin === "Q")).toBe(true);
+    expect(graph.edges.some((edge) => edge.from === `ff:${state}` && edge.to === `state-not:${state}` && edge.fromPin === "Q'")).toBe(true);
+  }
+}
+
+function expectStateGateInputsTraceToFlipFlops(graph: ReturnType<typeof buildAndLayout>) {
+  for (const edge of graph.edges) {
+    if (!edge.from.startsWith("state:") && !edge.from.startsWith("state-not:")) continue;
+    const state = edge.from.startsWith("state-not:") ? edge.from.slice("state-not:".length) : edge.from.slice("state:".length);
+    const fromPin = edge.from.startsWith("state-not:") ? "Q'" : "Q";
+    expect(graph.edges.some((sourceEdge) => sourceEdge.from === `ff:${state}` && sourceEdge.to === edge.from && sourceEdge.fromPin === fromPin), edge.id).toBe(true);
+  }
+}
+
+function expectFlipFlopsAreInRightColumn(graph: ReturnType<typeof buildAndLayout>) {
+  const flipFlops = graph.nodes.filter((node) => node.type === "FF");
+  const gates = graph.nodes.filter((node) => node.type === "AND" || node.type === "OR" || node.type === "NOT");
+  expect(new Set(flipFlops.map((node) => node.x)).size).toBe(1);
+  for (const gate of gates) {
+    expect(gate.x, gate.id).toBeLessThan(flipFlops[0].x);
+  }
+}
+
+function expectLayoutZonesAreOrdered(graph: ReturnType<typeof buildAndLayout>) {
+  const flipFlops = graph.nodes.filter((node) => node.type === "FF");
+  const andGates = graph.nodes.filter((node) => node.type === "AND");
+  const orGates = graph.nodes.filter((node) => node.type === "OR");
+  const externalNotGates = graph.nodes.filter((node) => node.type === "NOT" && node.id.startsWith("not:"));
+
+  for (const notGate of externalNotGates) {
+    for (const andGate of andGates) expect(notGate.x, `${notGate.id} before ${andGate.id}`).toBeLessThan(andGate.x);
+    for (const orGate of orGates) expect(notGate.x, `${notGate.id} before ${orGate.id}`).toBeLessThan(orGate.x);
+  }
+  for (const andGate of andGates) {
+    for (const orGate of orGates) expect(andGate.x, `${andGate.id} before ${orGate.id}`).toBeLessThan(orGate.x);
+  }
+  for (const gate of [...andGates, ...orGates, ...externalNotGates]) {
+    for (const flipFlop of flipFlops) expect(gate.x, `${gate.id} before ${flipFlop.id}`).toBeLessThan(flipFlop.x);
+  }
+}
+
+function expectStateFeedbackUsesRightBusThenSignalBus(graph: ReturnType<typeof buildAndLayout>) {
+  for (const edge of graph.edges.filter((edge) => edge.from.startsWith("state:") || edge.from.startsWith("state-not:"))) {
+    const state = edge.from.startsWith("state-not:") ? edge.from.slice("state-not:".length) : edge.from.slice("state:".length);
+    const sourceNet = edge.from.startsWith("state-not:") ? `${state}NOT`.toUpperCase() : state.toUpperCase();
+    if (edge.netId !== sourceNet) continue;
+    const points = toPointArray(edge.points ?? []);
+    expect(points.length, edge.id).toBeGreaterThanOrEqual(5);
+    expect(points[1].x, `${edge.id} right feedback bus`).toBe(points[0].x);
+    expect(points[2].y, `${edge.id} feedback lane`).toBe(points[1].y);
+    expect(points[2].x, `${edge.id} returns left`).toBeLessThan(points[0].x);
+  }
+}
+
+function expectClockStaysClearOfLogicGates(graph: ReturnType<typeof buildAndLayout>) {
+  const clockSegments = [
+    ...pointsToSegments(toPointArray(graph.clockLine.points)),
+    ...graph.clockLine.branches.flatMap((branch) => pointsToSegments(toPointArray(branch))),
+  ];
+  const gateBounds = graph.nodes
+    .filter((node) => node.type === "AND" || node.type === "OR" || node.type === "NOT")
+    .map((node) => expandBounds(getNodeBounds(node), 8));
+
+  for (const segment of clockSegments) {
+    for (const bounds of gateBounds) {
+      expect(segmentIntersectsBounds(segment, bounds), `CLK touches ${bounds.id}`).toBe(false);
+    }
+  }
+}
+
+function boundsOverlap(a: ReturnType<typeof getNodeBounds>, b: ReturnType<typeof getNodeBounds>) {
+  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+}
+
+function expectLogicGatesAreSeparated(graph: ReturnType<typeof buildAndLayout>) {
+  const gates = graph.nodes
+    .filter((node) => node.type === "AND" || node.type === "OR" || node.type === "NOT")
+    .map((node) => expandBounds(getNodeBounds(node), 6));
+
+  for (let index = 0; index < gates.length; index += 1) {
+    for (let otherIndex = index + 1; otherIndex < gates.length; otherIndex += 1) {
+      expect(boundsOverlap(gates[index], gates[otherIndex]), `${gates[index].id} overlaps ${gates[otherIndex].id}`).toBe(false);
+    }
+  }
+}
+
 describe("boolean parser", () => {
   it("parses grouped and implicit product expressions", () => {
     expect(parseBooleanEquation("(A + B)C")).toEqual({
@@ -259,7 +380,10 @@ describe("circuit graph generation", () => {
     }
 
     expect(graph.clockLine.branches).toHaveLength(states.length);
+    expect(graph.metadata.validationErrors ?? []).toEqual([]);
+    expectAllEdgesHaveNetIds(graph);
     expectStateOutputBusesArePinned(graph, states);
+    expectAllWiresAreOrthogonal(graph);
     expectFeedbackLanesAreSeparated(graph);
     expectNoWireObstacleCollisions(graph);
     expectNoFullyOverlappedWireSegments(graph);
@@ -267,13 +391,46 @@ describe("circuit graph generation", () => {
     expectGateInputWiresReachGateBodies(graph);
     expectComponentWireAnchorsReachBodies(graph);
     expectGateOutputWiresStartInsideBodies(graph);
+    expectStateVariablesComeOnlyFromFlipFlops(graph, states);
+    expectStateGateInputsTraceToFlipFlops(graph);
+    expectFlipFlopsAreInRightColumn(graph);
+    expectLayoutZonesAreOrdered(graph);
+    expectStateFeedbackUsesRightBusThenSignalBus(graph);
+    expectClockStaysClearOfLogicGates(graph);
+    expectLogicGatesAreSeparated(graph);
+  });
+
+  it("routes state variables as flip-flop feedback, not standalone inputs", () => {
+    const graph = buildAndLayout("jk", ["A", "B"], {
+      JA: "X + B",
+      KA: "X' + B",
+      JB: "X' + A",
+      KB: "X'",
+      Z: "BX + AX + AB",
+    });
+
+    expect(graph.nodes.filter((node) => node.type === "INPUT").map((node) => node.label).sort()).toEqual(["X"]);
+    expect(graph.metadata.validationErrors ?? []).toEqual([]);
+    expectAllEdgesHaveNetIds(graph);
+    expectStateVariablesComeOnlyFromFlipFlops(graph, ["A", "B"]);
+    expectStateGateInputsTraceToFlipFlops(graph);
+    expectAllWiresAreOrthogonal(graph);
+    expectFlipFlopsAreInRightColumn(graph);
+    expectLayoutZonesAreOrdered(graph);
+    expectStateFeedbackUsesRightBusThenSignalBus(graph);
+    expectClockStaysClearOfLogicGates(graph);
+    expectLogicGatesAreSeparated(graph);
   });
 
   it("exports complete SVG wires with debug attributes", () => {
     const graph = buildAndLayout("jk", ["A", "B", "C"], circuitFixtures[0].equations);
+    const contentBounds = getCircuitContentBounds(graph);
     const svg = circuitGraphToSvg(graph);
 
     expect(svg).toContain("overflow:visible");
+    expect(svg).toContain(`width="${contentBounds.width}"`);
+    expect(svg).toContain(`height="${contentBounds.height}"`);
+    expect(svg).toContain(`viewBox="${contentBounds.x} ${contentBounds.y} ${contentBounds.width} ${contentBounds.height}"`);
     expect(svg).toContain(">Clock</text>");
     for (const edge of graph.edges) {
       expect(edge.wireId).toBeTruthy();

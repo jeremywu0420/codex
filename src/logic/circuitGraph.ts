@@ -52,7 +52,7 @@ export function buildCircuitGraph({ equations, flipFlopType, variables }: Circui
   const normalizedEquations = normalizeEquations(equations);
   const nodes = new Map<string, CircuitNode>();
   const edges: CircuitEdge[] = [];
-  let gateCounter = 0;
+let gateCounter = 0;
 
   function addNode(node: CircuitNode) {
     if (!nodes.has(node.id)) nodes.set(node.id, node);
@@ -61,6 +61,14 @@ export function buildCircuitGraph({ equations, flipFlopType, variables }: Circui
 
   function addEdge(edge: CircuitEdge) {
     edges.push({ id: `${edge.from}->${edge.to}-${edges.length}`, ...edge });
+  }
+
+  function netIdForSignal(name: string) {
+    return name.replace(/'/g, "_NOT").replace(/_/g, "").toUpperCase();
+  }
+
+  function netIdForEquationLabel(label: string) {
+    return label.replace(/_/g, "").toUpperCase();
   }
 
   for (const input of variables.inputs) addNode(makeNode(`input:${input}`, "INPUT", input));
@@ -72,8 +80,8 @@ export function buildCircuitGraph({ equations, flipFlopType, variables }: Circui
       ...makeNode(`ff:${state}`, "FF", state, { state }),
       flipFlopType,
     });
-    addEdge({ from: `ff:${state}`, to: `state:${state}`, fromPin: "Q" });
-    addEdge({ from: `ff:${state}`, to: `state-not:${state}`, fromPin: "Q'" });
+    addEdge({ from: `ff:${state}`, to: `state:${state}`, fromPin: "Q", netId: netIdForSignal(state) });
+    addEdge({ from: `ff:${state}`, to: `state-not:${state}`, fromPin: "Q'", netId: netIdForSignal(`${state}'`) });
   }
 
   function sourceForVariable(name: string) {
@@ -86,27 +94,41 @@ export function buildCircuitGraph({ equations, flipFlopType, variables }: Circui
     if (variables.states.includes(name)) return `state-not:${name}`;
     const sourceId = sourceForVariable(name);
     const notId = addNode(makeNode(`not:${name}`, "NOT", `${name}'`, { ...target, source: name }));
-    if (!edges.some((edge) => edge.from === sourceId && edge.to === notId)) addEdge({ from: sourceId, to: notId });
+    if (!edges.some((edge) => edge.from === sourceId && edge.to === notId)) addEdge({ from: sourceId, to: notId, netId: netIdForSignal(name) });
     return notId;
   }
 
-  function buildFromAst(ast: BooleanAst, target: CircuitNode["metadata"]): string {
+  function buildFromAst(ast: BooleanAst, target: CircuitNode["metadata"], preferredNetId?: string): string {
     if (ast.type === "CONST") return addNode(makeNode(`const:${ast.value}`, "INPUT", ast.value));
     if (ast.type === "VAR") return sourceForVariable(ast.name);
     if (ast.type === "NOT" && ast.value.type === "VAR") return sourceForComplement(ast.value.name, target);
     if (ast.type === "NOT") {
       const childId = buildFromAst(ast.value, target);
       const nodeId = addNode(makeNode(`gate:not:${gateCounter++}`, "NOT", "NOT", target));
-      addEdge({ from: childId, to: nodeId });
+      addEdge({ from: childId, to: nodeId, netId: sourceNetId(childId) });
       return nodeId;
     }
     if (ast.type === "AND" || ast.type === "OR") {
       const nodeType = ast.type;
-      const nodeId = addNode(makeNode(`gate:${nodeType.toLowerCase()}:${gateCounter++}`, nodeType, nodeType, target));
-      ast.terms.forEach((term) => addEdge({ from: buildFromAst(term, target), to: nodeId }));
+      const gateIndex = gateCounter++;
+      const nodeId = addNode(makeNode(`gate:${nodeType.toLowerCase()}:${gateIndex}`, nodeType, nodeType, { ...target, outputNetId: preferredNetId ?? `N${gateIndex}` }));
+      ast.terms.forEach((term) => {
+        const childId = buildFromAst(term, target);
+        addEdge({ from: childId, to: nodeId, netId: sourceNetId(childId) });
+      });
       return nodeId;
     }
     return sourceForVariable("0");
+  }
+
+  function sourceNetId(sourceId: string) {
+    if (sourceId.startsWith("input:")) return netIdForSignal(sourceId.slice("input:".length));
+    if (sourceId.startsWith("state-not:")) return netIdForSignal(`${sourceId.slice("state-not:".length)}'`);
+    if (sourceId.startsWith("state:")) return netIdForSignal(sourceId.slice("state:".length));
+    if (sourceId.startsWith("not:")) return netIdForSignal(`${sourceId.slice("not:".length)}'`);
+    const sourceNode = nodes.get(sourceId);
+    const netId = sourceNode?.metadata?.outputNetId;
+    return typeof netId === "string" ? netId : sourceId.replace(/[^A-Za-z0-9]+/g, "_").toUpperCase();
   }
 
   for (const equation of normalizedEquations) {
@@ -122,7 +144,8 @@ export function buildCircuitGraph({ equations, flipFlopType, variables }: Circui
         ? { targetKind: "ff", targetState: parsedLabel.state, targetPin: parsedLabel.pin }
         : { targetKind: "output", targetOutput: parsedLabel.outputName }),
     };
-    const rootId = buildFromAst(ast, targetMetadata);
+    const equationNetId = netIdForEquationLabel(equation.label);
+    const rootId = buildFromAst(ast, { ...targetMetadata, outputNetId: equationNetId }, equationNetId);
 
     if (parsedLabel.kind === "ff-input") {
       addEdge({
@@ -130,7 +153,8 @@ export function buildCircuitGraph({ equations, flipFlopType, variables }: Circui
         to: `ff:${parsedLabel.state}`,
         toPin: parsedLabel.pin,
         label: equation.label,
-        metadata: targetMetadata,
+        netId: equationNetId,
+        metadata: { ...targetMetadata, outputNetId: equationNetId },
       });
     } else {
       const outputId = addNode(makeNode(`output:${parsedLabel.outputName}`, "OUTPUT", parsedLabel.outputName));
@@ -138,7 +162,8 @@ export function buildCircuitGraph({ equations, flipFlopType, variables }: Circui
         from: rootId,
         to: outputId,
         label: parsedLabel.outputName,
-        metadata: targetMetadata,
+        netId: equationNetId,
+        metadata: { ...targetMetadata, outputNetId: equationNetId },
       });
     }
   }

@@ -81,7 +81,7 @@ input {
 .workspace-grid {
   display: grid;
   grid-template-columns: 290px minmax(340px, 0.82fr) minmax(640px, 1.28fr);
-  min-height: 760px;
+  align-items: start;
 }
 
 .sidebar,
@@ -293,14 +293,14 @@ th {
 
 .kmap-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(156px, 1fr));
+  gap: 10px;
 }
 
 .kmap-scroll {
-  max-height: 640px;
+  max-height: 460px;
   overflow-y: auto;
-  padding-right: 8px;
+  padding-right: 6px;
 }
 
 .kmap-card {
@@ -312,8 +312,8 @@ th {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 12px;
+  gap: 6px;
+  margin-bottom: 8px;
 }
 
 .kmap {
@@ -324,7 +324,7 @@ th {
 
 .kmap-cell {
   display: grid;
-  min-height: 58px;
+  min-height: 44px;
   place-items: center;
   border-right: 1px solid #cbd5e1;
   border-bottom: 1px solid #cbd5e1;
@@ -333,12 +333,12 @@ th {
 
 .kmap-cell small {
   color: #94a3b8;
-  font-size: 10px;
+  font-size: 9px;
 }
 
 .kmap-cell span {
   font-family: "Times New Roman", Georgia, serif;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
 }
 
@@ -382,6 +382,7 @@ th {
   border-radius: 4px;
   padding: 9px 12px;
   font-size: 12px;
+  white-space: pre-line;
 }
 
 .diagram-alert.error {
@@ -398,13 +399,18 @@ th {
 
 .stage-wrap {
   width: 100%;
+  max-height: min(72vh, 760px);
   overflow: auto;
   background: #ffffff;
 }
 
+.stage-wrap .konvajs-content {
+  display: block;
+}
+
 .diagram-placeholder {
   display: grid;
-  min-height: 420px;
+  min-height: 240px;
   place-items: center;
   color: #64748b;
   font-size: 14px;

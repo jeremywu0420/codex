@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import type Konva from "konva";
 import { Circle, Group, Layer, Line, Path, Rect, Stage, Text } from "react-konva";
-import { circuitGraphToSvg, collectWireJunctionDots, expandBounds, layoutCircuitGraph } from "../logic/circuitLayout";
+import { circuitGraphToSvg, collectWireJunctionDots, expandBounds, getCircuitContentBounds, layoutCircuitGraph } from "../logic/circuitLayout";
 import { useCircuitStore } from "../store/useCircuitStore";
 import type { CircuitBounds, CircuitGraph, CircuitNode, FlipFlopType } from "../types";
 
@@ -110,7 +110,8 @@ function GateBody({ node }: { node: CircuitNode }) {
 function NodeLabel({ node }: { node: CircuitNode }) {
   if (node.type === "FF") return <FlipFlopLabels node={node} />;
   if (node.type === "AND" || node.type === "OR" || node.type === "NOT") return null;
-  return <FormulaText x={node.x + 8} y={node.y - 11} label={node.label} size={13} />;
+  const labelX = typeof node.metadata?.labelX === "number" ? node.metadata.labelX : node.x + 8;
+  return <FormulaText x={labelX} y={node.y - 11} label={node.label} size={13} />;
 }
 
 function RoutingBounds({ bounds }: { bounds: CircuitBounds[] }) {
@@ -216,6 +217,7 @@ export function CircuitDiagram({ showRoutingBounds = false }: CircuitDiagramProp
     () => JSON.stringify({ equations, flipFlopType, variables }),
     [equations, flipFlopType, variables],
   );
+  const contentBounds = useMemo(() => (graph ? getCircuitContentBounds(graph) : null), [graph]);
   const isOutdated = Boolean(graph && generatedSignature !== currentSignature);
   const canUseDiagram = Boolean(graph);
 
@@ -238,6 +240,12 @@ export function CircuitDiagram({ showRoutingBounds = false }: CircuitDiagramProp
     setIsLoading(true);
     await Promise.resolve();
     const layoutedGraph = layoutCircuitGraph(circuitGraph);
+    if (layoutedGraph.metadata.validationErrors?.length) {
+      setGraph(null);
+      setError(`Circuit validation failed:\n${layoutedGraph.metadata.validationErrors.join("\n")}`);
+      setIsLoading(false);
+      return;
+    }
     setGraph(layoutedGraph);
     setGeneratedSignature(currentSignature);
     setPosition({ x: 0, y: 0 });
@@ -285,22 +293,22 @@ export function CircuitDiagram({ showRoutingBounds = false }: CircuitDiagramProp
       {isOutdated ? <div className="diagram-alert warning">Circuit is outdated. Click Generate Circuit again to update.</div> : null}
 
       <div className="stage-wrap" id="circuit-diagram">
-        {!graph ? (
+        {!graph || !contentBounds ? (
           <div className="diagram-placeholder">Click Generate Circuit to create the circuit diagram from current equations.</div>
         ) : (
           <Stage
             draggable
-            height={graph.metadata.height}
+            height={Math.ceil(contentBounds.height * zoom)}
             onDragEnd={(event) => setPosition(event.target.position())}
             ref={stageRef}
             scaleX={zoom}
             scaleY={zoom}
-            width={graph.metadata.width}
+            width={Math.ceil(contentBounds.width * zoom)}
             x={position.x}
             y={position.y}
           >
-            <Layer>
-              <Rect x={0} y={0} width={graph.metadata.width} height={graph.metadata.height} fill="white" />
+            <Layer x={-contentBounds.x} y={-contentBounds.y}>
+              <Rect x={contentBounds.x} y={contentBounds.y} width={contentBounds.width} height={contentBounds.height} fill="white" />
               <RenderCircuitDiagram graph={graph} showRoutingBounds={showRoutingBounds} />
             </Layer>
           </Stage>

@@ -69,6 +69,7 @@ export interface CircuitEdge {
   to: string;
   id?: string;
   label?: string;
+  netId?: string;
   fromPin?: string;
   toPin?: string;
   points?: number[];
@@ -111,5 +112,6 @@ export interface CircuitGraph {
     outputVariables: string[];
     generatedAt?: string;
     routingBounds?: CircuitBounds[];
+    validationErrors?: string[];
   };
 }

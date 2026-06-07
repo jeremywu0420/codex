@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { Bit, CircuitGraph, Equation, FlipFlopType, KMapModel, LogicValue, ModelType, StateTableRow, Variables } from "../types";
 import { buildCircuitGraph } from "../logic/circuitGraph";
-import { deriveEquations } from "../logic/equations";
+import { deriveSequentialPipeline } from "../logic/equations";
 import { buildKMap } from "../logic/kmap";
 
 interface CircuitState {
@@ -156,7 +156,8 @@ function normalizeMooreOutputs(stateTable: StateTableRow[], variables: Variables
 }
 
 function compute(modelType: ModelType, flipFlopType: FlipFlopType, variables: Variables, stateTable: StateTableRow[]) {
-  const equations = deriveEquations(stateTable, variables, modelType, flipFlopType);
+  const pipeline = deriveSequentialPipeline(stateTable, variables, modelType, flipFlopType);
+  const equations = pipeline.circuitEquations;
   const kMaps = equations.map(buildKMap);
   const circuitGraph = buildCircuitGraph({ equations, flipFlopType, variables });
   return { equations, kMaps, circuitGraph };

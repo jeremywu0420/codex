@@ -19,7 +19,7 @@ export function KMapViewer() {
                   <strong>{equation ? <Formula text={equation.label} /> : null}</strong>
                   <Formula text={equation?.expression ?? ""} />
                 </header>
-                <div className="kmap" style={{ gridTemplateColumns: `repeat(${columns}, minmax(42px, 1fr))` }}>
+                <div className="kmap" style={{ gridTemplateColumns: `repeat(${columns}, minmax(34px, 1fr))` }}>
                   {map.cells.map((cell) => (
                     <div className={`kmap-cell value-${cell.value === "-" ? "dc" : cell.value}`} key={cell.minterm}>
                       <small>m{cell.minterm}</small>

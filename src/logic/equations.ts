@@ -12,18 +12,23 @@ function columnToEquation(label: string, variableNames: string[], column: Record
   return minimizeBoolean(label, variableNames, minterms, dontCares);
 }
 
-export function deriveEquations(
-  rows: StateTableRow[],
-  variables: Variables,
-  modelType: ModelType,
-  flipFlopType: Parameters<typeof buildExcitationColumns>[2],
-): Equation[] {
-  const excitation = buildExcitationColumns(rows, variables, flipFlopType);
-  const equations = Object.entries(excitation.columns).map(([label, column]) =>
-    columnToEquation(label, excitation.variableNames, column),
-  );
+function buildNextStateColumns(rows: StateTableRow[], variables: Variables) {
+  const variableNames = [...variables.states, ...variables.inputs];
+  const columns: Record<string, Record<number, LogicValue>> = {};
+  for (const stateName of variables.states) columns[`${stateName}+`] = {};
 
-  for (const outputName of variables.outputs) {
+  for (const row of rows) {
+    const minterm = assignmentToIndex(rowToAssignment(row, variableNames), variableNames);
+    for (const stateName of variables.states) {
+      columns[`${stateName}+`][minterm] = row.nextState[stateName];
+    }
+  }
+
+  return { variableNames, columns };
+}
+
+function deriveOutputEquations(rows: StateTableRow[], variables: Variables, modelType: ModelType) {
+  return variables.outputs.map((outputName) => {
     const outputVariables = modelType === "moore" ? variables.states : [...variables.states, ...variables.inputs];
     const column: Record<number, LogicValue> = {};
     for (const row of rows) {
@@ -32,8 +37,40 @@ export function deriveEquations(
       if (modelType === "moore" && column[minterm] !== undefined) continue;
       column[minterm] = row.output[outputName];
     }
-    equations.push(columnToEquation(outputName, outputVariables, column));
-  }
+    return columnToEquation(outputName, outputVariables, column);
+  });
+}
 
-  return equations;
+export function deriveSequentialPipeline(
+  rows: StateTableRow[],
+  variables: Variables,
+  modelType: ModelType,
+  flipFlopType: Parameters<typeof buildExcitationColumns>[2],
+) {
+  const nextState = buildNextStateColumns(rows, variables);
+  const nextStateEquations = Object.entries(nextState.columns).map(([label, column]) =>
+    columnToEquation(label, nextState.variableNames, column),
+  );
+
+  const excitation = buildExcitationColumns(rows, variables, flipFlopType);
+  const excitationEquations = Object.entries(excitation.columns).map(([label, column]) =>
+    columnToEquation(label, excitation.variableNames, column),
+  );
+
+  const outputEquations = deriveOutputEquations(rows, variables, modelType);
+  return {
+    nextStateEquations,
+    excitationEquations,
+    outputEquations,
+    circuitEquations: [...excitationEquations, ...outputEquations],
+  };
+}
+
+export function deriveEquations(
+  rows: StateTableRow[],
+  variables: Variables,
+  modelType: ModelType,
+  flipFlopType: Parameters<typeof buildExcitationColumns>[2],
+): Equation[] {
+  return deriveSequentialPipeline(rows, variables, modelType, flipFlopType).circuitEquations;
 }

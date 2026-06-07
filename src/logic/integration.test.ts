@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildCircuitGraph } from "./circuitGraph";
-import { deriveEquations } from "./equations";
+import { deriveEquations, deriveSequentialPipeline } from "./equations";
 import { buildKMap } from "./kmap";
 import { minimizeBoolean } from "./minimizer";
 import type { FlipFlopType, StateTableRow, Variables } from "../types";
@@ -23,6 +23,15 @@ describe("logic integration", () => {
   it("derives Mealy outputs from state and input variables", () => {
     const equations = deriveEquations(rows, variables, "mealy", "d");
     expect(equations.find((equation) => equation.label === "Z")?.variableNames).toEqual(["A", "X"]);
+  });
+
+  it("derives next-state equations before excitation equations", () => {
+    const pipeline = deriveSequentialPipeline(rows, variables, "mealy", "jk");
+
+    expect(pipeline.nextStateEquations.map((equation) => equation.label)).toEqual(["A+"]);
+    expect(pipeline.excitationEquations.map((equation) => equation.label)).toEqual(["J_A", "K_A"]);
+    expect(pipeline.outputEquations.map((equation) => equation.label)).toEqual(["Z"]);
+    expect(pipeline.circuitEquations.map((equation) => equation.label)).toEqual(["J_A", "K_A", "Z"]);
   });
 
   it("derives Moore outputs from state variables only", () => {
