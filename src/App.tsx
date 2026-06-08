@@ -3,6 +3,7 @@ import { EquationDisplay } from "./components/EquationDisplay";
 import { ExportButton } from "./components/ExportButton";
 import { KMapViewer } from "./components/KMapViewer";
 import { Selectors } from "./components/Selectors";
+import { StateDiagramPanel } from "./components/StateDiagramPanel";
 import { StateTableEditor } from "./components/StateTableEditor";
 import { TimingDiagramPanel } from "./components/TimingDiagramPanel";
 import { useCircuitStore } from "./store/useCircuitStore";
@@ -34,6 +35,7 @@ export default function App() {
               <button className="ghost-button" type="button">Clear Table</button>
               <button className="ghost-button" type="button">Load Example</button>
             </div>
+            <StateDiagramPanel />
           </aside>
 
           <section className="output-column">
