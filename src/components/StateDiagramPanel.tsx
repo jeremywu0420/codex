@@ -20,6 +20,7 @@ interface DiagramTransition {
 }
 
 interface EdgeGeometry {
+  labelCandidates: LabelCandidate[];
   labelNormal: Point;
   labelPosition: Point;
   labelTangent: Point;
@@ -38,6 +39,13 @@ interface LabelBox {
   top: number;
 }
 
+interface LabelCandidate {
+  edgePoint: Point;
+  offset: number;
+  position: Point;
+  priority: number;
+}
+
 interface DiagramLayout {
   center: Point;
   height: number;
@@ -48,13 +56,15 @@ interface DiagramLayout {
 const FIXED_WIDTH = 420;
 const FIXED_HEIGHT = 320;
 const NODE_RADIUS = 36;
-const REVERSE_EDGE_CURVE_OFFSET = 48;
-const SINGLE_EDGE_CURVE_OFFSET = 24;
+const REVERSE_EDGE_CURVE_OFFSET = 64;
+const SINGLE_EDGE_CURVE_OFFSET = 30;
 const LABEL_PATH_OFFSET = 18;
-const LABEL_COLLISION_STEP = 12;
-const LABEL_COLLISION_ATTEMPTS = 5;
 const LABEL_VIEWBOX_MARGIN = 4;
 const LABEL_HEIGHT = 22;
+const NODE_LABEL_CLEARANCE = 8;
+const LABEL_TIME_CANDIDATES = [0.5, 0.44, 0.56, 0.38, 0.62, 0.35, 0.65];
+const LABEL_OFFSET_CANDIDATES = [14, 18, 10, 20];
+const SELF_LOOP_LABEL_OFFSET_CANDIDATES = [8, 12, 16, 20];
 const FIXED_TWO_BIT_POSITIONS: Record<string, Point> = {
   "00": { x: 210, y: 70 },
   "01": { x: 80, y: 250 },
@@ -220,6 +230,35 @@ function quadraticPoint(start: Point, control: Point, end: Point, time: number):
   };
 }
 
+function cubicPoint(start: Point, controlOne: Point, controlTwo: Point, end: Point, time: number): Point {
+  const inverse = 1 - time;
+  return {
+    x:
+      inverse * inverse * inverse * start.x +
+      3 * inverse * inverse * time * controlOne.x +
+      3 * inverse * time * time * controlTwo.x +
+      time * time * time * end.x,
+    y:
+      inverse * inverse * inverse * start.y +
+      3 * inverse * inverse * time * controlOne.y +
+      3 * inverse * time * time * controlTwo.y +
+      time * time * time * end.y,
+  };
+}
+
+function makeLabelCandidate(edgePoint: Point, normal: Point, offset: number, priority: number): LabelCandidate {
+  return {
+    edgePoint,
+    offset,
+    position: computeLabelPosition(edgePoint, normal, offset),
+    priority,
+  };
+}
+
+function candidateDistance(candidate: LabelCandidate) {
+  return Math.hypot(candidate.position.x - candidate.edgePoint.x, candidate.position.y - candidate.edgePoint.y);
+}
+
 function getCanonicalNormal(edge: DiagramTransition, source: DiagramNode, target: DiagramNode) {
   const canonicalSource = edge.source < edge.target ? source : target;
   const canonicalTarget = edge.source < edge.target ? target : source;
@@ -275,10 +314,24 @@ function computeCurvedEdgePath(edge: DiagramTransition, source: DiagramNode, tar
     },
     unit,
   );
+  const labelCandidates = LABEL_TIME_CANDIDATES.flatMap((time, timeIndex) =>
+    LABEL_OFFSET_CANDIDATES.flatMap((offset, offsetIndex) =>
+      [
+        makeLabelCandidate(quadraticPoint(start, control, end, time), labelNormal, offset, timeIndex * 10 + offsetIndex),
+        makeLabelCandidate(
+          quadraticPoint(start, control, end, time),
+          { x: -labelNormal.x, y: -labelNormal.y },
+          offset,
+          100 + timeIndex * 10 + offsetIndex,
+        ),
+      ],
+    ),
+  );
 
   return {
+    labelCandidates,
     labelNormal,
-    labelPosition: computeLabelPosition(labelBase, labelNormal),
+    labelPosition: labelCandidates[0]?.position ?? computeLabelPosition(labelBase, labelNormal),
     labelTangent,
     path: `M ${pathPoint(start)} Q ${pathPoint(control)} ${pathPoint(end)}`,
   };
@@ -307,14 +360,17 @@ function computeSelfLoopPath(node: DiagramNode, center: Point): EdgeGeometry {
     x: node.x + unit.x * loopDistance + normal.x * 38,
     y: node.y + unit.y * loopDistance + normal.y * 38,
   };
-  const label = {
-    x: node.x + unit.x * (NODE_RADIUS + 22),
-    y: node.y + unit.y * (NODE_RADIUS + 22),
-  };
+  const labelBase = cubicPoint(start, controlOne, controlTwo, end, 0.5);
+  const labelCandidates = LABEL_TIME_CANDIDATES.flatMap((time, timeIndex) =>
+    SELF_LOOP_LABEL_OFFSET_CANDIDATES.map((offset, offsetIndex) =>
+      makeLabelCandidate(cubicPoint(start, controlOne, controlTwo, end, time), unit, offset, timeIndex * 10 + offsetIndex),
+    ),
+  );
 
   return {
+    labelCandidates,
     labelNormal: unit,
-    labelPosition: label,
+    labelPosition: labelCandidates[0]?.position ?? computeLabelPosition(labelBase, unit),
     labelTangent: normal,
     path: `M ${pathPoint(start)} C ${pathPoint(controlOne)} ${pathPoint(controlTwo)} ${pathPoint(end)}`,
   };
@@ -356,6 +412,15 @@ function getLabelBBox(label: string, position: Point): LabelBox {
   };
 }
 
+function getNodeBBox(node: DiagramNode): LabelBox {
+  return {
+    bottom: node.y + NODE_RADIUS + NODE_LABEL_CLEARANCE,
+    left: node.x - NODE_RADIUS - NODE_LABEL_CLEARANCE,
+    right: node.x + NODE_RADIUS + NODE_LABEL_CLEARANCE,
+    top: node.y - NODE_RADIUS - NODE_LABEL_CLEARANCE,
+  };
+}
+
 function isOverlapping(first: LabelBox, second: LabelBox) {
   return first.left < second.right && first.right > second.left && first.top < second.bottom && first.bottom > second.top;
 }
@@ -379,41 +444,60 @@ function keepLabelInsideViewBox(edge: RenderedEdge, position: Point, viewBox: Pi
   };
 }
 
-function hasLabelCollision(label: string, position: Point, placedBoxes: LabelBox[]) {
-  const currentBox = getLabelBBox(label, position);
-  return placedBoxes.some((placedBox) => isOverlapping(currentBox, placedBox));
+function overlapArea(first: LabelBox, second: LabelBox) {
+  const width = Math.max(0, Math.min(first.right, second.right) - Math.max(first.left, second.left));
+  const height = Math.max(0, Math.min(first.bottom, second.bottom) - Math.max(first.top, second.top));
+  return width * height;
 }
 
-function resolveLabelCollisions(edges: RenderedEdge[], viewBox: Pick<DiagramLayout, "height" | "width">) {
+function totalOverlapArea(box: LabelBox, boxes: LabelBox[]) {
+  return boxes.reduce((sum, candidate) => sum + overlapArea(box, candidate), 0);
+}
+
+function scoreLabelCandidate(
+  edge: RenderedEdge,
+  candidate: LabelCandidate,
+  position: Point,
+  placedBoxes: LabelBox[],
+  nodeBoxes: LabelBox[],
+) {
+  const box = getLabelBBox(edge.label, position);
+  const nodeOverlapArea = totalOverlapArea(box, nodeBoxes);
+  const labelOverlapArea = totalOverlapArea(box, placedBoxes);
+  const nodeOverlapCount = nodeBoxes.filter((nodeBox) => isOverlapping(box, nodeBox)).length;
+  const labelOverlapCount = placedBoxes.filter((placedBox) => isOverlapping(box, placedBox)).length;
+  const viewShift = Math.hypot(position.x - candidate.position.x, position.y - candidate.position.y);
+
+  return (
+    nodeOverlapCount * 1_000_000 +
+    nodeOverlapArea * 4_000 +
+    labelOverlapCount * 100_000 +
+    labelOverlapArea * 1_000 +
+    viewShift * 500 +
+    candidate.priority * 8 +
+    candidateDistance(candidate) * 2
+  );
+}
+
+function resolveLabelCollisions(edges: RenderedEdge[], layout: DiagramLayout) {
   const placedBoxes: LabelBox[] = [];
+  const nodeBoxes = layout.nodes.map(getNodeBBox);
 
   return edges.map((edge) => {
-    const labelNormal = normalizeVector(edge.labelNormal);
-    const labelTangent = normalizeVector(edge.labelTangent, { x: -labelNormal.y, y: labelNormal.x });
-    const originalPosition = keepLabelInsideViewBox(edge, edge.labelPosition, viewBox);
-    let labelPosition = originalPosition;
-
-    for (let attempt = 1; attempt <= LABEL_COLLISION_ATTEMPTS; attempt += 1) {
-      if (!hasLabelCollision(edge.label, labelPosition, placedBoxes)) break;
-      labelPosition = keepLabelInsideViewBox(
-        edge,
-        offsetPoint(originalPosition, labelNormal, LABEL_COLLISION_STEP * attempt),
-        viewBox,
-      );
-    }
-
-    if (hasLabelCollision(edge.label, labelPosition, placedBoxes)) {
-      for (let attempt = 1; attempt <= LABEL_COLLISION_ATTEMPTS; attempt += 1) {
-        const direction = attempt % 2 === 0 ? -1 : 1;
-        const distance = LABEL_COLLISION_STEP * Math.ceil(attempt / 2);
-        labelPosition = keepLabelInsideViewBox(
-          edge,
-          offsetPoint(labelPosition, labelTangent, direction * distance),
-          viewBox,
-        );
-        if (!hasLabelCollision(edge.label, labelPosition, placedBoxes)) break;
-      }
-    }
+    const candidates = edge.labelCandidates.length
+      ? edge.labelCandidates
+      : [{ edgePoint: edge.labelPosition, offset: LABEL_PATH_OFFSET, position: edge.labelPosition, priority: 0 }];
+    const [bestCandidate] = candidates
+      .map((candidate) => {
+        const position = keepLabelInsideViewBox(edge, candidate.position, layout);
+        return {
+          candidate,
+          position,
+          score: scoreLabelCandidate(edge, candidate, position, placedBoxes, nodeBoxes),
+        };
+      })
+      .sort((first, second) => first.score - second.score);
+    const labelPosition = bestCandidate?.position ?? keepLabelInsideViewBox(edge, edge.labelPosition, layout);
 
     placedBoxes.push(getLabelBBox(edge.label, labelPosition));
     return {
@@ -503,10 +587,10 @@ export function renderStateDiagram(stateTable: StateTableRow[], machineType: Mod
         </marker>
       </defs>
       <g className="edges-layer state-edge-layer">{renderedEdges.map(renderEdge)}</g>
-      <g className="nodes-layer state-node-layer">{layout.nodes.map((node) => renderNode(node, machineType))}</g>
       <g className="labels-layer state-label-layer">
         {renderedEdges.map((edge) => renderEdgeLabel(edge.label, edge.labelPosition, `${edge.key}-label`))}
       </g>
+      <g className="nodes-layer state-node-layer">{layout.nodes.map((node) => renderNode(node, machineType))}</g>
     </svg>
   );
 }
