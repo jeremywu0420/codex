@@ -46,7 +46,7 @@ function pointKey(point: { x: number; y: number }) {
 function AndGate({ node }: { node: CircuitNode }) {
   return (
     <Group x={node.x} y={node.y}>
-      <Path data="M0 0 L30 0 Q66 22 30 44 L0 44 Z" stroke={wire} strokeWidth={1.45} fill="white" />
+      <Path data="M0 0 L44 0 A22 22 0 0 1 44 44 L0 44 Z" stroke={wire} strokeWidth={1.45} fill="white" />
     </Group>
   );
 }
@@ -63,7 +63,7 @@ function NotGate({ node }: { node: CircuitNode }) {
   return (
     <Group>
       <Line points={[node.x, node.y, node.x + 30, node.y + 15, node.x, node.y + 30, node.x, node.y]} stroke={wire} strokeWidth={1.35} closed fill="white" />
-      <Circle x={node.x + 35} y={node.y + 15} radius={4} stroke={wire} strokeWidth={1.35} fill="white" />
+      <Circle x={node.x + 35} y={node.y + 15} radius={5} stroke={wire} strokeWidth={1.35} fill="white" />
     </Group>
   );
 }

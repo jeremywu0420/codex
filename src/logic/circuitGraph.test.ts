@@ -8,6 +8,7 @@ import {
   expandBounds,
   getCircuitContentBounds,
   getNodeBounds,
+  getNodePins,
   layoutCircuitGraph,
   pathIntersectsObstacles,
   pointsToSegments,
@@ -257,16 +258,23 @@ function expectComponentWireAnchorsReachBodies(graph: ReturnType<typeof buildAnd
   }
 }
 
-function expectGateOutputWiresStartInsideBodies(graph: ReturnType<typeof buildAndLayout>) {
+function expectGateOutputWiresStartAtOutputPins(graph: ReturnType<typeof buildAndLayout>) {
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
   for (const edge of graph.edges) {
     const node = nodeById.get(edge.from);
     if (!node) continue;
     if (!(node.type === "AND" || node.type === "OR" || node.type === "NOT")) continue;
-    expect(edge.sourceAnchor?.x, `${edge.id} output x`).toBeGreaterThan(node.x);
-    expect(edge.sourceAnchor?.x, `${edge.id} output x`).toBeLessThan(node.x + (node.width ?? 0));
-    expect(edge.sourceAnchor?.y, `${edge.id} output y`).toBeGreaterThan(node.y);
-    expect(edge.sourceAnchor?.y, `${edge.id} output y`).toBeLessThan(node.y + (node.height ?? 0));
+    const outputPin = getNodePins(node).outputPin;
+    const points = toPointArray(edge.points ?? []);
+    expect(outputPin, `${edge.id} output pin`).toBeTruthy();
+    expect(edge.sourceAnchor, `${edge.id} source anchor`).toEqual(outputPin);
+    expect(points[0], `${edge.id} first wire point`).toEqual(outputPin);
+    expect(edge.sourceAnchor?.x, `${edge.id} output x`).toBe(node.x + (node.width ?? 0));
+    expect(edge.sourceAnchor?.y, `${edge.id} output y`).toBe(node.y + (node.height ?? 0) / 2);
+    if (points.length > 2) {
+      expect(points[1].y, `${edge.id} output exit y`).toBe(points[0].y);
+      expect(points[1].x, `${edge.id} output exit x`).toBeGreaterThan(points[0].x);
+    }
   }
 }
 
@@ -474,7 +482,7 @@ describe("circuit graph generation", () => {
     expectJunctionDotsStayOutsideComponentBodies(graph);
     expectGateInputWiresReachGateBodies(graph);
     expectComponentWireAnchorsReachBodies(graph);
-    expectGateOutputWiresStartInsideBodies(graph);
+    expectGateOutputWiresStartAtOutputPins(graph);
     expectStateVariablesComeOnlyFromFlipFlops(graph, states);
     expectStateGateInputsTraceToFlipFlops(graph);
     expectFlipFlopsAreInRightColumn(graph);

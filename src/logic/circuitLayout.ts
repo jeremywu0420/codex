@@ -108,13 +108,12 @@ export function getNodePins(node: CircuitNode, inputCount = 2): NodePins {
       x: inputX,
       y: gateInputY(node, index, Math.max(1, inputCount)),
     }));
-    const outputInset = node.type === "OR" ? 18 : 28;
-    const outputPin = { x: node.x + width - outputInset, y: node.y + height / 2 };
+    const outputPin = { x: node.x + width, y: node.y + height / 2 };
     return { inputPins, outputPin, pins: { output: outputPin, out: outputPin } };
   }
   if (node.type === "NOT") {
     const inputPin = { x: node.x + 2, y: node.y + height / 2 };
-    const outputPin = { x: node.x + 31, y: node.y + height / 2 };
+    const outputPin = { x: node.x + width, y: node.y + height / 2 };
     return { inputPins: [inputPin], outputPin, pins: { input: inputPin, output: outputPin, out: outputPin } };
   }
   const anchor = { x: node.x, y: node.y };
@@ -411,6 +410,16 @@ function laneRoute(from: Point, to: Point, laneX: number) {
   return compactPoints([from, { x: laneX, y: from.y }, { x: laneX, y: to.y }, to]);
 }
 
+function gateOutputExit(from: Point, distance = routingChannelX) {
+  return { x: from.x + distance, y: from.y };
+}
+
+function gateOutputLaneRoute(from: Point, to: Point, laneX: number) {
+  const exit = gateOutputExit(from);
+  const safeLaneX = Math.max(laneX, exit.x);
+  return compactPoints([from, exit, { x: safeLaneX, y: from.y }, { x: safeLaneX, y: to.y }, to]);
+}
+
 function edgeInputIndex(edge: CircuitEdge) {
   return Number(edge.metadata?.gateInputIndex ?? 0);
 }
@@ -498,10 +507,10 @@ function deterministicRouteEdge(edge: CircuitEdge, nodes: CircuitNode[]) {
   }
 
   if (fromNode.type === "NOT" && toNode.type === "FF") {
-    const exitX = from.x + 22 + laneIndex * 6;
+    const exitX = from.x + routingChannelX + laneIndex * 6;
     const { laneX } = ffInputLane(edge, from, to);
     const topLaneY = Math.min(from.y, to.y) - 64 - laneIndex * 12;
-    return compactPoints([from, { x: from.x, y: topLaneY }, { x: exitX, y: topLaneY }, { x: laneX, y: topLaneY }, { x: laneX, y: to.y }, to]);
+    return compactPoints([from, gateOutputExit(from), { x: exitX, y: from.y }, { x: exitX, y: topLaneY }, { x: laneX, y: topLaneY }, { x: laneX, y: to.y }, to]);
   }
 
   if (fromNode.type === "INPUT" && isGate(toNode)) {
@@ -529,7 +538,7 @@ function deterministicRouteEdge(edge: CircuitEdge, nodes: CircuitNode[]) {
 
   if (isGate(fromNode) && fromNode.type !== "NOT" && toNode.type === "FF") {
     const { laneX, laneY } = ffInputLane(edge, from, to);
-    return compactPoints([from, { x: from.x, y: laneY }, { x: laneX, y: laneY }, { x: laneX, y: to.y }, to]);
+    return compactPoints([from, gateOutputExit(from), { x: from.x + routingChannelX, y: laneY }, { x: laneX, y: laneY }, { x: laneX, y: to.y }, to]);
   }
 
   if (fromNode.type === "INPUT" && toNode.type === "FF") {
@@ -543,7 +552,7 @@ function deterministicRouteEdge(edge: CircuitEdge, nodes: CircuitNode[]) {
   }
 
   if (isGate(fromNode) && toNode.type === "OUTPUT") {
-    return laneRoute(from, to, to.x - 38);
+    return gateOutputLaneRoute(from, to, to.x - 38);
   }
 
   if ((fromNode.type === "INPUT" || fromNode.type === "NOT") && toNode.type === "OUTPUT") {
@@ -1244,13 +1253,13 @@ function svgFormulaText(x: number, y: number, label: string, size = 13) {
 
 function svgGateBody(node: CircuitNode) {
   if (node.type === "AND") {
-    return `<path d="M${node.x} ${node.y} L${node.x + 30} ${node.y} Q${node.x + 66} ${node.y + 22} ${node.x + 30} ${node.y + 44} L${node.x} ${node.y + 44} Z" stroke="#64748b" stroke-width="1.45" fill="white"/>`;
+    return `<path d="M${node.x} ${node.y} L${node.x + 44} ${node.y} A22 22 0 0 1 ${node.x + 44} ${node.y + 44} L${node.x} ${node.y + 44} Z" stroke="#64748b" stroke-width="1.45" fill="white"/>`;
   }
   if (node.type === "OR") {
     return `<path d="M${node.x} ${node.y} Q${node.x + 44} ${node.y + 5} ${node.x + 86} ${node.y + 30} Q${node.x + 44} ${node.y + 55} ${node.x} ${node.y + 60} Q${node.x + 22} ${node.y + 30} ${node.x} ${node.y} Z" stroke="#64748b" stroke-width="1.45" fill="white"/>`;
   }
   if (node.type === "NOT") {
-    return `<path d="M${node.x} ${node.y} L${node.x + 30} ${node.y + 15} L${node.x} ${node.y + 30} Z" stroke="#64748b" stroke-width="1.35" fill="white"/><circle cx="${node.x + 35}" cy="${node.y + 15}" r="4" stroke="#64748b" stroke-width="1.35" fill="white"/>`;
+    return `<path d="M${node.x} ${node.y} L${node.x + 30} ${node.y + 15} L${node.x} ${node.y + 30} Z" stroke="#64748b" stroke-width="1.35" fill="white"/><circle cx="${node.x + 35}" cy="${node.y + 15}" r="5" stroke="#64748b" stroke-width="1.35" fill="white"/>`;
   }
   return "";
 }
