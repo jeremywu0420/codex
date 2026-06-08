@@ -4,6 +4,7 @@ import { buildCircuitGraph } from "./circuitGraph";
 import {
   circuitGraphToSvg,
   collectWireJunctionDots,
+  detectJunctions,
   expandBounds,
   getCircuitContentBounds,
   getNodeBounds,
@@ -13,7 +14,7 @@ import {
   segmentIntersectsBounds,
   segmentsOverlap,
 } from "./circuitLayout";
-import type { FlipFlopType, Variables } from "../types";
+import type { CircuitGraph, FlipFlopType, Variables } from "../types";
 
 function variables(states: string[]): Variables {
   return {
@@ -26,6 +27,22 @@ function variables(states: string[]): Variables {
 
 function buildAndLayout(flipFlopType: FlipFlopType, states: string[], equations: Record<string, string>) {
   return layoutCircuitGraph(buildCircuitGraph({ equations, flipFlopType, variables: variables(states) }));
+}
+
+function graphWithEdges(edges: CircuitGraph["edges"]): CircuitGraph {
+  return {
+    nodes: [],
+    edges,
+    clockLine: { label: "Clock", points: [], branches: [] },
+    metadata: {
+      width: 120,
+      height: 80,
+      flipFlopType: "d",
+      stateVariables: [],
+      inputVariables: [],
+      outputVariables: [],
+    },
+  };
 }
 
 const circuitFixtures: Array<{
@@ -383,6 +400,50 @@ describe("boolean parser", () => {
 });
 
 describe("circuit graph generation", () => {
+  it("draws a junction dot where a same-net branch leaves a trunk", () => {
+    const graph = graphWithEdges([
+      { id: "trunk", from: "source", to: "sink-a", netId: "N", wireId: "N_trunk", points: [0, 0, 100, 0] },
+      { id: "branch", from: "source", to: "sink-b", netId: "N", wireId: "N_branch", points: [50, 0, 50, 50] },
+    ]);
+
+    expect(collectWireJunctionDots(graph)).toEqual(expect.arrayContaining([expect.objectContaining({ x: 50, y: 0 })]));
+  });
+
+  it("does not draw a junction dot for visual crossings between different nets", () => {
+    const graph = graphWithEdges([
+      { id: "horizontal", from: "a", to: "b", netId: "A", wireId: "A_wire", points: [0, 0, 100, 0] },
+      { id: "vertical", from: "c", to: "d", netId: "B", wireId: "B_wire", points: [50, -30, 50, 30] },
+    ]);
+
+    expect(collectWireJunctionDots(graph).some((dot) => dot.x === 50 && dot.y === 0)).toBe(false);
+  });
+
+  it("keeps simple same-net bends from being treated as junctions", () => {
+    const dots = detectJunctions([
+      { netId: "N", wireId: "N_wire", from: { x: 0, y: 0 }, to: { x: 50, y: 0 } },
+      { netId: "N", wireId: "N_wire", from: { x: 50, y: 0 }, to: { x: 50, y: 50 } },
+    ]);
+
+    expect(dots.some((dot) => dot.x === 50 && dot.y === 0)).toBe(false);
+  });
+
+  it("does not draw a junction dot where a same-net straight wire is split into collinear segments", () => {
+    const dots = detectJunctions([
+      { netId: "N", wireId: "N_left", from: { x: 0, y: 0 }, to: { x: 50, y: 0 } },
+      { netId: "N", wireId: "N_right", from: { x: 50, y: 0 }, to: { x: 100, y: 0 } },
+    ]);
+
+    expect(dots.some((dot) => dot.x === 50 && dot.y === 0)).toBe(false);
+  });
+
+  it("does not draw a junction dot on the middle of a single straight wire", () => {
+    const dots = detectJunctions([
+      { netId: "N", wireId: "N_wire", from: { x: 0, y: 0 }, to: { x: 100, y: 0 } },
+    ]);
+
+    expect(dots).toEqual([]);
+  });
+
   it("builds JK flip-flop pins and gate nodes", () => {
     const graph = buildAndLayout("jk", ["A", "B", "C"], circuitFixtures[0].equations);
     expect(graph.edges.some((edge) => edge.to === "ff:A" && edge.toPin === "J")).toBe(true);
@@ -592,6 +653,8 @@ describe("circuit graph generation", () => {
     expect(svg).toContain(`height="${contentBounds.height}"`);
     expect(svg).toContain(`viewBox="${contentBounds.x} ${contentBounds.y} ${contentBounds.width} ${contentBounds.height}"`);
     expect(svg).toContain(">Clock</text>");
+    expect(svg.indexOf('class="junction-dot"')).toBeGreaterThan(-1);
+    expect(svg.indexOf('class="junction-dot"')).toBeLessThan(svg.indexOf("<text"));
     for (const edge of graph.edges) {
       expect(edge.wireId).toBeTruthy();
       expect(svg).toContain(`data-wire-id="${edge.wireId}"`);

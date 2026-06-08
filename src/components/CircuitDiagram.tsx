@@ -36,7 +36,7 @@ function FormulaText({ x, y, label, size = 13 }: { x: number; y: number; label: 
 }
 
 function Junction({ x, y }: { x: number; y: number }) {
-  return <Circle x={x} y={y} radius={3} fill="#111827" />;
+  return <Circle x={x} y={y} radius={3} fill="#000000" />;
 }
 
 function pointKey(point: { x: number; y: number }) {
@@ -185,17 +185,17 @@ function RenderCircuitDiagram({ graph, showRoutingBounds = false }: { graph: Cir
         <FlipFlopBody key={node.id} node={node} />
       ))}
       {showRoutingBounds ? <RoutingBounds bounds={graph.metadata.routingBounds ?? []} /> : null}
-      {/* labels layer */}
-      <ClockLabels graph={graph} />
-      {graph.nodes.map((node) => (
-        <NodeLabel key={node.id} node={node} />
-      ))}
       {/* junction dots layer */}
       {graph.clockLine.branches.map((branch, index) => (
         <Junction key={`clock-${index}-dot`} x={branch[0]} y={branch[1]} />
       ))}
       {junctionDots.map((point) => (
         <Junction key={`junction-${pointKey(point)}`} x={point.x} y={point.y} />
+      ))}
+      {/* labels layer */}
+      <ClockLabels graph={graph} />
+      {graph.nodes.map((node) => (
+        <NodeLabel key={node.id} node={node} />
       ))}
     </>
   );
