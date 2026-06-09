@@ -430,6 +430,118 @@ th {
   padding: 0;
 }
 
+.verification-panel {
+  padding: 18px 20px 20px;
+}
+
+.verification-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.verification-header h2 {
+  margin: 0;
+}
+
+.verification-badge {
+  border: 1px solid #dbe2ea;
+  border-radius: 4px;
+  padding: 5px 9px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.verification-badge.pass {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.verification-badge.fail {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.verification-badge.warning {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.verification-checks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: 10px;
+}
+
+.verification-check {
+  border: 1px solid #e2e8f0;
+  border-radius: 5px;
+  padding: 10px;
+  background: #ffffff;
+}
+
+.verification-check strong {
+  display: block;
+  color: #334155;
+  font-size: 12px;
+}
+
+.verification-check span {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.verification-check p {
+  margin: 7px 0 0;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.verification-check.pass span {
+  color: #166534;
+}
+
+.verification-check.fail span {
+  color: #991b1b;
+}
+
+.verification-check.skipped span {
+  color: #92400e;
+}
+
+.verification-section {
+  margin-top: 16px;
+}
+
+.verification-section h3 {
+  margin: 0 0 8px;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.verification-list {
+  margin: 0;
+  padding-left: 18px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.verification-message-cell {
+  max-width: 340px;
+  text-align: left;
+  white-space: normal;
+}
+
 .timing-config {
   padding: 16px 24px 0;
 }

@@ -283,7 +283,7 @@ type CircuitDiagramProps = {
 };
 
 export function CircuitDiagram({ showRoutingBounds = false }: CircuitDiagramProps = {}) {
-  const { circuitGraph, equations, flipFlopType, variables } = useCircuitStore();
+  const { circuitGraph, equations, flipFlopType, setGeneratedCircuitGraph, variables } = useCircuitStore();
   const stageRef = useRef<Konva.Stage>(null);
   const [graph, setGraph] = useState<CircuitGraph | null>(null);
   const [generatedSignature, setGeneratedSignature] = useState("");
@@ -304,33 +304,45 @@ export function CircuitDiagram({ showRoutingBounds = false }: CircuitDiagramProp
     if (isLoading) return;
     setError("");
     if (!equations.length) {
+      setGeneratedCircuitGraph(null);
       setError("No equations available. Generate equations before creating the circuit.");
       return;
     }
     if (!variables.states.length) {
+      setGeneratedCircuitGraph(null);
       setError("No state variables available. Add at least one state variable.");
       return;
     }
     if (!flipFlopType) {
+      setGeneratedCircuitGraph(null);
       setError("Select a flip-flop type before generating the circuit.");
       return;
     }
 
     setIsLoading(true);
     await Promise.resolve();
-    const layoutedGraph = layoutCircuitGraph(circuitGraph);
-    logCircuitGenerationDebug(layoutedGraph, equations, flipFlopType);
-    if (layoutedGraph.metadata.validationErrors?.length) {
+    try {
+      const layoutedGraph = layoutCircuitGraph(circuitGraph);
+      logCircuitGenerationDebug(layoutedGraph, equations, flipFlopType);
+      if (layoutedGraph.metadata.validationErrors?.length) {
+        setGraph(null);
+        setGeneratedCircuitGraph(null);
+        setError(`Circuit validation failed:\n${layoutedGraph.metadata.validationErrors.join("\n")}`);
+        setIsLoading(false);
+        return;
+      }
+      setGraph(layoutedGraph);
+      setGeneratedCircuitGraph(layoutedGraph);
+      setGeneratedSignature(currentSignature);
+      setPosition({ x: 0, y: 0 });
+      setZoom(1);
+    } catch (generationError) {
       setGraph(null);
-      setError(`Circuit validation failed:\n${layoutedGraph.metadata.validationErrors.join("\n")}`);
+      setGeneratedCircuitGraph(null);
+      setError(generationError instanceof Error ? generationError.message : "Circuit generation failed.");
+    } finally {
       setIsLoading(false);
-      return;
     }
-    setGraph(layoutedGraph);
-    setGeneratedSignature(currentSignature);
-    setPosition({ x: 0, y: 0 });
-    setZoom(1);
-    setIsLoading(false);
   }
 
   function resetView() {

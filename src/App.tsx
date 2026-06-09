@@ -6,6 +6,7 @@ import { Selectors } from "./components/Selectors";
 import { StateDiagramPanel } from "./components/StateDiagramPanel";
 import { StateTableEditor } from "./components/StateTableEditor";
 import { TimingDiagramPanel } from "./components/TimingDiagramPanel";
+import { VerificationPanel } from "./components/VerificationPanel";
 import { useCircuitStore } from "./store/useCircuitStore";
 
 export default function App() {
@@ -50,6 +51,7 @@ export default function App() {
               <ExportButton />
             </div>
             <CircuitDiagram />
+            <VerificationPanel />
             <div className="output-tab">OUTPUT 3: TIMING DIAGRAM / CLOCK WAVEFORM</div>
             <TimingDiagramPanel />
           </section>

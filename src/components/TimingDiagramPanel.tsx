@@ -13,7 +13,7 @@ function formatBits(names: string[], values: Record<string, string>) {
 }
 
 export function TimingDiagramPanel() {
-  const { flipFlopType, modelType, stateTable, variables } = useCircuitStore();
+  const { flipFlopType, modelType, setTimingTrace, stateTable, variables } = useCircuitStore();
   const [timingSvg, setTimingSvg] = useState("");
   const [generatedSignature, setGeneratedSignature] = useState("");
   const [error, setError] = useState("");
@@ -49,6 +49,7 @@ export function TimingDiagramPanel() {
   function generateTimingDiagram() {
     setTimingSvg("");
     setTraceSteps([]);
+    setTimingTrace(null);
     setGeneratedSignature("");
     setError("");
     try {
@@ -65,10 +66,12 @@ export function TimingDiagramPanel() {
       console.table(timingStepsToConsoleRows(timingData.steps));
       setTimingSvg(renderTimingDiagramSVG(timingData));
       setTraceSteps(timingData.steps);
+      setTimingTrace(timingData.steps);
       setGeneratedSignature(currentSignature);
     } catch (generationError) {
       setTimingSvg("");
       setTraceSteps([]);
+      setTimingTrace(null);
       setGeneratedSignature("");
       setError(
         generationError instanceof Error
@@ -81,6 +84,7 @@ export function TimingDiagramPanel() {
   function resetTimingDiagram() {
     setTimingSvg("");
     setTraceSteps([]);
+    setTimingTrace(null);
     setGeneratedSignature("");
     setError("");
   }

@@ -3,20 +3,31 @@ import type { Bit, CircuitGraph, Equation, FlipFlopType, KMapModel, LogicValue, 
 import { buildCircuitGraph } from "../logic/circuitGraph";
 import { deriveSequentialPipeline } from "../logic/equations";
 import { buildKMap } from "../logic/kmap";
+import type { TimingStep } from "../logic/timing";
+import { verifyAllResults } from "../lib/verification";
+import type { VerificationResult } from "../lib/verification";
 
 interface CircuitState {
   modelType: ModelType;
   flipFlopType: FlipFlopType;
   variables: Variables;
   stateTable: StateTableRow[];
+  nextStateEquations: Equation[];
+  excitationEquations: Equation[];
+  outputEquations: Equation[];
   equations: Equation[];
   kMaps: KMapModel[];
   circuitGraph: CircuitGraph;
+  generatedCircuitGraph: CircuitGraph | null;
+  timingTrace: TimingStep[] | null;
+  verification: VerificationResult;
   setModelType: (modelType: ModelType) => void;
   setFlipFlopType: (flipFlopType: FlipFlopType) => void;
   setVariables: (patch: Partial<Pick<Variables, "inputs" | "outputs">>) => void;
   updateRow: (rowId: string, patch: Partial<StateTableRow>) => void;
   updateMooreOutput: (rowId: string, outputName: string, value: LogicValue) => void;
+  setGeneratedCircuitGraph: (generatedCircuitGraph: CircuitGraph | null) => void;
+  setTimingTrace: (timingTrace: TimingStep[] | null) => void;
   recompute: () => void;
 }
 
@@ -155,12 +166,64 @@ function normalizeMooreOutputs(stateTable: StateTableRow[], variables: Variables
   }));
 }
 
-function compute(modelType: ModelType, flipFlopType: FlipFlopType, variables: Variables, stateTable: StateTableRow[]) {
+function buildVerification(
+  modelType: ModelType,
+  flipFlopType: FlipFlopType,
+  variables: Variables,
+  stateTable: StateTableRow[],
+  nextStateEquations: Equation[],
+  excitationEquations: Equation[],
+  outputEquations: Equation[],
+  timingTrace: TimingStep[] | null,
+  generatedCircuitGraph: CircuitGraph | null,
+) {
+  return verifyAllResults({
+    stateTable,
+    modelType,
+    flipFlopType,
+    variables,
+    nextStateEquations,
+    excitationEquations,
+    outputEquations,
+    timingTrace,
+    circuitGraph: generatedCircuitGraph,
+  });
+}
+
+function compute(
+  modelType: ModelType,
+  flipFlopType: FlipFlopType,
+  variables: Variables,
+  stateTable: StateTableRow[],
+  timingTrace: TimingStep[] | null = null,
+  generatedCircuitGraph: CircuitGraph | null = null,
+) {
   const pipeline = deriveSequentialPipeline(stateTable, variables, modelType, flipFlopType);
   const equations = pipeline.circuitEquations;
   const kMaps = equations.map(buildKMap);
   const circuitGraph = buildCircuitGraph({ equations, flipFlopType, variables });
-  return { equations, kMaps, circuitGraph };
+  const verification = buildVerification(
+    modelType,
+    flipFlopType,
+    variables,
+    stateTable,
+    pipeline.nextStateEquations,
+    pipeline.excitationEquations,
+    pipeline.outputEquations,
+    timingTrace,
+    generatedCircuitGraph,
+  );
+  return {
+    nextStateEquations: pipeline.nextStateEquations,
+    excitationEquations: pipeline.excitationEquations,
+    outputEquations: pipeline.outputEquations,
+    equations,
+    kMaps,
+    circuitGraph,
+    generatedCircuitGraph,
+    timingTrace,
+    verification,
+  };
 }
 
 const initialStateTable = buildStateTable(initialVariables, initialRows, initialVariables);
@@ -212,6 +275,36 @@ export const useCircuitStore = create<CircuitState>((set, get) => ({
     });
     const next = compute(get().modelType, get().flipFlopType, get().variables, stateTable);
     set({ stateTable, ...next });
+  },
+  setGeneratedCircuitGraph: (generatedCircuitGraph) => {
+    const state = get();
+    const verification = buildVerification(
+      state.modelType,
+      state.flipFlopType,
+      state.variables,
+      state.stateTable,
+      state.nextStateEquations,
+      state.excitationEquations,
+      state.outputEquations,
+      state.timingTrace,
+      generatedCircuitGraph,
+    );
+    set({ generatedCircuitGraph, verification });
+  },
+  setTimingTrace: (timingTrace) => {
+    const state = get();
+    const verification = buildVerification(
+      state.modelType,
+      state.flipFlopType,
+      state.variables,
+      state.stateTable,
+      state.nextStateEquations,
+      state.excitationEquations,
+      state.outputEquations,
+      timingTrace,
+      state.generatedCircuitGraph,
+    );
+    set({ timingTrace, verification });
   },
   recompute: () => {
     const next = compute(get().modelType, get().flipFlopType, get().variables, get().stateTable);
