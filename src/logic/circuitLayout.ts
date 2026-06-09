@@ -14,7 +14,7 @@ const zone = {
   busTrackStep: 30,
   productX: 470,
   sumX: 650,
-  outputX: 792,
+  outputX: 824,
   ffX: 880,
   feedbackBusX: 1062,
   gateToGateLaneX: 608,
@@ -482,6 +482,8 @@ function deterministicRouteEdge(edge: CircuitEdge, nodes: CircuitNode[]) {
 
   if ((fromNode.type === "STATE" || fromNode.type === "STATE_NOT") && toNode.type === "FF") {
     const { laneX } = ffInputLane(edge, from, to);
+    const leftSafeLaneX = zone.sumX + gateSize("OR").width + routingChannelX + 18;
+    const approachLaneX = Math.max(leftSafeLaneX, Math.min(laneX, zone.ffApproachX - laneIndex * 10));
     const bottomLaneY = Math.max(from.y, to.y, toNode.y + (toNode.height ?? ffHeight)) + 90 + laneIndex * 14;
     const sourceIsStateNet = edgeNetId === stateSourceNet;
     const exitX = sourceIsStateNet ? metadataNumber(fromNode, "feedbackExitX") ?? from.x + 44 : from.x + 86 + laneIndex * 10;
@@ -489,8 +491,8 @@ function deterministicRouteEdge(edge: CircuitEdge, nodes: CircuitNode[]) {
       from,
       { x: exitX, y: from.y },
       { x: exitX, y: bottomLaneY },
-      { x: laneX, y: bottomLaneY },
-      { x: laneX, y: to.y },
+      { x: approachLaneX, y: bottomLaneY },
+      { x: approachLaneX, y: to.y },
       to,
     ]);
   }
@@ -507,10 +509,9 @@ function deterministicRouteEdge(edge: CircuitEdge, nodes: CircuitNode[]) {
   }
 
   if (fromNode.type === "NOT" && toNode.type === "FF") {
-    const exitX = from.x + routingChannelX + laneIndex * 6;
     const { laneX } = ffInputLane(edge, from, to);
-    const topLaneY = Math.min(from.y, to.y) - 64 - laneIndex * 12;
-    return compactPoints([from, gateOutputExit(from), { x: exitX, y: from.y }, { x: exitX, y: topLaneY }, { x: laneX, y: topLaneY }, { x: laneX, y: to.y }, to]);
+    const exit = gateOutputExit(from);
+    return compactPoints([from, exit, { x: laneX, y: from.y }, { x: laneX, y: to.y }, to]);
   }
 
   if (fromNode.type === "INPUT" && isGate(toNode)) {
@@ -537,8 +538,9 @@ function deterministicRouteEdge(edge: CircuitEdge, nodes: CircuitNode[]) {
   }
 
   if (isGate(fromNode) && fromNode.type !== "NOT" && toNode.type === "FF") {
-    const { laneX, laneY } = ffInputLane(edge, from, to);
-    return compactPoints([from, gateOutputExit(from), { x: from.x + routingChannelX, y: laneY }, { x: laneX, y: laneY }, { x: laneX, y: to.y }, to]);
+    const { laneX } = ffInputLane(edge, from, to);
+    const exit = gateOutputExit(from);
+    return compactPoints([from, exit, { x: laneX, y: from.y }, { x: laneX, y: to.y }, to]);
   }
 
   if (fromNode.type === "INPUT" && toNode.type === "FF") {

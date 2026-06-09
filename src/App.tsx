@@ -1,4 +1,5 @@
 import { CircuitDiagram } from "./components/CircuitDiagram";
+import { CodeGeneratorPanel } from "./components/CodeGeneratorPanel";
 import { EquationDisplay } from "./components/EquationDisplay";
 import { ExportButton } from "./components/ExportButton";
 import { KMapViewer } from "./components/KMapViewer";
@@ -36,25 +37,33 @@ export default function App() {
               <button className="ghost-button" type="button">Clear Table</button>
               <button className="ghost-button" type="button">Load Example</button>
             </div>
-            <StateDiagramPanel />
           </aside>
 
-          <section className="output-column">
-            <div className="output-tab">OUTPUT 1: K-MAPS AND SIMPLIFIED EQUATIONS</div>
-            <KMapViewer />
-            <EquationDisplay />
-          </section>
+          <div className="main-workspace">
+            <section className="state-code-row">
+              <StateDiagramPanel />
+              <CodeGeneratorPanel />
+            </section>
 
-          <section className="diagram-column">
-            <div className="output-tab output-tab-actions">
-              <span>OUTPUT 2: SEQUENTIAL CIRCUIT DIAGRAM</span>
-              <ExportButton />
+            <div className="report-columns">
+              <section className="output-column">
+                <div className="output-tab">OUTPUT 1: K-MAPS AND SIMPLIFIED EQUATIONS</div>
+                <KMapViewer />
+                <EquationDisplay />
+              </section>
+
+              <section className="diagram-column">
+                <div className="output-tab output-tab-actions">
+                  <span>OUTPUT 2: SEQUENTIAL CIRCUIT DIAGRAM</span>
+                  <ExportButton />
+                </div>
+                <CircuitDiagram />
+                <VerificationPanel />
+                <div className="output-tab">OUTPUT 3: TIMING DIAGRAM / CLOCK WAVEFORM</div>
+                <TimingDiagramPanel />
+              </section>
             </div>
-            <CircuitDiagram />
-            <VerificationPanel />
-            <div className="output-tab">OUTPUT 3: TIMING DIAGRAM / CLOCK WAVEFORM</div>
-            <TimingDiagramPanel />
-          </section>
+          </div>
         </div>
       </div>
     </main>

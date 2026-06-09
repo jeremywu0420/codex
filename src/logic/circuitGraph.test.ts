@@ -117,6 +117,14 @@ function pointDistance(a: { x: number; y: number }, b: { x: number; y: number })
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
+function pathLength(points: { x: number; y: number }[]) {
+  let length = 0;
+  for (let index = 0; index < points.length - 1; index += 1) {
+    length += Math.abs(points[index + 1].x - points[index].x) + Math.abs(points[index + 1].y - points[index].y);
+  }
+  return length;
+}
+
 function expectNoWireObstacleCollisions(graph: ReturnType<typeof buildAndLayout>) {
   const obstacles = graph.nodes.map(getNodeBounds).map((bounds) => expandBounds(bounds, (bounds.padding ?? 0) + 8));
 
@@ -278,6 +286,20 @@ function expectGateOutputWiresStartAtOutputPins(graph: ReturnType<typeof buildAn
   }
 }
 
+function expectGateToFlipFlopRoutesAreShortAndDirect(graph: ReturnType<typeof buildAndLayout>) {
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+  for (const edge of graph.edges) {
+    const fromNode = nodeById.get(edge.from);
+    const toNode = nodeById.get(edge.to);
+    if (!(fromNode?.type === "AND" || fromNode?.type === "OR")) continue;
+    if (toNode?.type !== "FF") continue;
+    const points = toPointArray(edge.points ?? []);
+    const minimumLength = Math.abs((edge.targetAnchor?.x ?? 0) - (edge.sourceAnchor?.x ?? 0)) + Math.abs((edge.targetAnchor?.y ?? 0) - (edge.sourceAnchor?.y ?? 0));
+    expect(pathLength(points), edge.id).toBeLessThanOrEqual(minimumLength + 48);
+    expect(points.length, edge.id).toBeLessThanOrEqual(5);
+  }
+}
+
 function expectStateVariablesComeOnlyFromFlipFlops(graph: ReturnType<typeof buildAndLayout>, states: string[]) {
   for (const state of states) {
     expect(graph.nodes.some((node) => node.id === `input:${state}`), `${state} standalone input`).toBe(false);
@@ -338,6 +360,38 @@ function expectStateFeedbackUsesRightBusThenSignalBus(graph: ReturnType<typeof b
     expect(points[2].x, `${edge.id} right feedback bus`).toBe(points[1].x);
     expect(points[3].y, `${edge.id} feedback lane`).toBe(points[2].y);
     expect(points[3].x, `${edge.id} returns left`).toBeLessThan(points[0].x);
+  }
+}
+
+function expectStateSignalsShareOneFeedbackTrunk(graph: ReturnType<typeof buildAndLayout>) {
+  const trunkBySource = new Map<string, { exitX: number; laneX: number; laneY: number }>();
+  for (const edge of graph.edges.filter((edge) => (edge.from.startsWith("state:") || edge.from.startsWith("state-not:")) && edge.to.startsWith("gate:"))) {
+    const points = toPointArray(edge.points ?? []);
+    if (points.length < 4) continue;
+    const trunk = {
+      exitX: points[1].x,
+      laneX: points[2].x,
+      laneY: points[2].y,
+    };
+    const previous = trunkBySource.get(edge.from);
+    if (!previous) {
+      trunkBySource.set(edge.from, trunk);
+      continue;
+    }
+    expect(trunk, edge.id).toEqual(previous);
+  }
+}
+
+function expectOutputsStayRightOfLogicAndLeftOfFeedback(graph: ReturnType<typeof buildAndLayout>) {
+  const flipFlopX = Math.min(...graph.nodes.filter((node) => node.type === "FF").map((node) => node.x));
+  const gateRight = Math.max(
+    ...graph.nodes
+      .filter((node) => node.type === "AND" || node.type === "OR" || node.type === "NOT")
+      .map((node) => node.x + (node.width ?? 0)),
+  );
+  for (const output of graph.nodes.filter((node) => node.type === "OUTPUT")) {
+    expect(output.x, output.id).toBeGreaterThan(gateRight);
+    expect(output.x, output.id).toBeLessThan(flipFlopX);
   }
 }
 
@@ -488,8 +542,11 @@ describe("circuit graph generation", () => {
     expectFlipFlopsAreInRightColumn(graph);
     expectLayoutZonesAreOrdered(graph);
     expectStateFeedbackUsesRightBusThenSignalBus(graph);
+    expectStateSignalsShareOneFeedbackTrunk(graph);
     expectClockStaysClearOfLogicGates(graph);
     expectLogicGatesAreSeparated(graph);
+    expectGateToFlipFlopRoutesAreShortAndDirect(graph);
+    expectOutputsStayRightOfLogicAndLeftOfFeedback(graph);
   });
 
   it("routes state variables as flip-flop feedback, not standalone inputs", () => {
@@ -510,8 +567,11 @@ describe("circuit graph generation", () => {
     expectFlipFlopsAreInRightColumn(graph);
     expectLayoutZonesAreOrdered(graph);
     expectStateFeedbackUsesRightBusThenSignalBus(graph);
+    expectStateSignalsShareOneFeedbackTrunk(graph);
     expectClockStaysClearOfLogicGates(graph);
     expectLogicGatesAreSeparated(graph);
+    expectGateToFlipFlopRoutesAreShortAndDirect(graph);
+    expectOutputsStayRightOfLogicAndLeftOfFeedback(graph);
   });
 
   it("generates D flip-flop circuits from current equations without JK pins or net overlaps", () => {
@@ -543,6 +603,9 @@ describe("circuit graph generation", () => {
     expectGateInputWiresReachGateBodies(graph);
     expectStateVariablesComeOnlyFromFlipFlops(graph, ["A", "B"]);
     expectStateGateInputsTraceToFlipFlops(graph);
+    expectStateSignalsShareOneFeedbackTrunk(graph);
+    expectGateToFlipFlopRoutesAreShortAndDirect(graph);
+    expectOutputsStayRightOfLogicAndLeftOfFeedback(graph);
   });
 
   it("generates T flip-flop circuits when X' directly feeds an OR gate", () => {
@@ -560,6 +623,9 @@ describe("circuit graph generation", () => {
     expectAllWiresAreOrthogonal(graph);
     expectNoWireObstacleCollisions(graph);
     expectNoFullyOverlappedWireSegments(graph);
+    expectStateSignalsShareOneFeedbackTrunk(graph);
+    expectGateToFlipFlopRoutesAreShortAndDirect(graph);
+    expectOutputsStayRightOfLogicAndLeftOfFeedback(graph);
   });
 
   it("does not draw flip-flop output wires for unused Q or Q' ports", () => {
