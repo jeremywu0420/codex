@@ -1,9 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Clipboard, Download, PlayCircle } from "lucide-react";
 import { buildCodeGeneratorArtifacts, type CodeTabId } from "../logic/codeGenerator";
 import { layoutCircuitGraph } from "../logic/circuitLayout";
 import { buildDefaultInputSequence, generateTimingData } from "../logic/timing";
+import { runTestbenchSimulation } from "../logic/testbenchSimulation";
+import type { TestbenchSimulationResult } from "../logic/testbenchSimulation";
 import { useCircuitStore } from "../store/useCircuitStore";
 
 const VERILOG_KEYWORDS = new Set([
@@ -35,10 +37,10 @@ function highlightVerilog(code: string): ReactNode[] {
   return nodes;
 }
 
-function VerilogCode({ code }: { code: string }) {
+function VerilogCode({ code, className = "" }: { code: string; className?: string }) {
   const highlighted = useMemo(() => highlightVerilog(code), [code]);
   return (
-    <pre className="code-block">
+    <pre className={`code-block ${className}`.trim()}>
       <code>{highlighted}</code>
     </pre>
   );
@@ -75,6 +77,83 @@ function verificationLabel(status: ReturnType<typeof buildCodeGeneratorArtifacts
   return "PASS";
 }
 
+function SimulationResultPanel({
+  error,
+  inputLabel,
+  onRun,
+  outputLabel,
+  result,
+}: {
+  error: string;
+  inputLabel: string;
+  onRun: () => void;
+  outputLabel: string;
+  result: TestbenchSimulationResult | null;
+}) {
+  const status = result?.status ?? "idle";
+  const statusText = status === "idle" ? "NOT RUN" : status.toUpperCase();
+
+  return (
+    <aside className="simulation-panel">
+      <div className="simulation-header">
+        <h3>Simulation Result</h3>
+        <span className={`simulation-status ${status}`}>{statusText}</span>
+      </div>
+      <div className="simulation-actions">
+        <button onClick={onRun} type="button">
+          <PlayCircle size={14} />
+          Run Simulation
+        </button>
+      </div>
+      {error ? <div className="diagram-alert error simulation-error">{error}</div> : null}
+      <pre className="simulation-console">
+        {result ? (
+          result.consoleLines.map((line, index) => (
+            <span className={`simulation-console-line ${line.startsWith("PASS") ? "pass" : "fail"}`} key={`${line}-${index}`}>
+              {line}
+              {"\n"}
+            </span>
+          ))
+        ) : (
+          <span className="simulation-console-line muted">No simulation run yet.</span>
+        )}
+      </pre>
+      {result ? (
+        <div className="simulation-table-wrap">
+          <table className="simulation-table">
+            <thead>
+              <tr>
+                <th>Step</th>
+                <th>{inputLabel}</th>
+                <th>Present State</th>
+                <th>Expected {outputLabel}</th>
+                <th>Actual {outputLabel}</th>
+                <th>Expected Next State</th>
+                <th>Actual Next State</th>
+                <th>Result</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.rows.map((row) => (
+                <tr key={row.step}>
+                  <td>{row.step}</td>
+                  <td>{row.inputBits}</td>
+                  <td>{row.expectedPresentState}</td>
+                  <td>{row.expectedOutput}</td>
+                  <td>{row.actualOutput}</td>
+                  <td>{row.expectedNextState}</td>
+                  <td>{row.actualNextState}</td>
+                  <td className={`simulation-result-cell ${row.result}`}>{row.result.toUpperCase()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+    </aside>
+  );
+}
+
 export function CodeGeneratorPanel() {
   const {
     circuitGraph,
@@ -92,6 +171,8 @@ export function CodeGeneratorPanel() {
   const [activeTab, setActiveTab] = useState<CodeTabId>("behavioral");
   const [copied, setCopied] = useState(false);
   const [verifyError, setVerifyError] = useState("");
+  const [simulationResult, setSimulationResult] = useState<TestbenchSimulationResult | null>(null);
+  const [simulationError, setSimulationError] = useState("");
 
   // Computes the circuit layout and a timing simulation headlessly so the
   // skipped verification checks can run without visiting the other tabs.
@@ -143,6 +224,15 @@ export function CodeGeneratorPanel() {
   const canPreview = artifacts.isStateTableComplete && Boolean(activeCode);
   const canDownload = canPreview && artifacts.verificationStatus === "pass";
   const fsmDownloadCode = activeTab === "gate" ? artifacts.gateLevelVerilog : artifacts.behavioralVerilog;
+  const simulationSignature = useMemo(
+    () => JSON.stringify({ flipFlopType, initialStateBits, modelType, stateTable, timingTrace, variables }),
+    [flipFlopType, initialStateBits, modelType, stateTable, timingTrace, variables],
+  );
+
+  useEffect(() => {
+    setSimulationResult(null);
+    setSimulationError("");
+  }, [simulationSignature]);
 
   async function copyActiveCode() {
     if (!canPreview) return;
@@ -153,6 +243,25 @@ export function CodeGeneratorPanel() {
     }
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1400);
+  }
+
+  function runSimulation() {
+    setSimulationError("");
+    try {
+      setSimulationResult(
+        runTestbenchSimulation({
+          stateTable,
+          variables,
+          modelType,
+          flipFlopType,
+          initialStateBits,
+          timingTrace,
+        }),
+      );
+    } catch (error) {
+      setSimulationResult(null);
+      setSimulationError(error instanceof Error ? error.message : "Simulation failed.");
+    }
   }
 
   return (
@@ -198,7 +307,20 @@ export function CodeGeneratorPanel() {
               ))}
             </div>
 
-            <VerilogCode code={activeCode} />
+            {activeTab === "testbench" ? (
+              <div className="code-generator-testbench-layout">
+                <VerilogCode className="code-block-embedded" code={activeCode} />
+                <SimulationResultPanel
+                  error={simulationError}
+                  inputLabel={variables.inputs.join("") || "X"}
+                  onRun={runSimulation}
+                  outputLabel={variables.outputs.join("") || "Z"}
+                  result={simulationResult}
+                />
+              </div>
+            ) : (
+              <VerilogCode code={activeCode} />
+            )}
           </div>
 
           <div className="code-actions">

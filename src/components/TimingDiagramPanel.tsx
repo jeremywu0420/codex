@@ -1,173 +1,214 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { exportTimingPNG, exportTimingSVG } from "../export/timing";
-import { buildDefaultInputSequence, generateTimingData, parseInputSequence, renderTimingDiagramSVG, timingStepsToConsoleRows } from "../logic/timing";
+import { buildDefaultInputSequence } from "../logic/timing";
 import { useCircuitStore } from "../store/useCircuitStore";
-import type { TimingStep } from "../logic/timing";
+import { SimulationControls } from "./timing/SimulationControls";
+import { TimingDiagram } from "./timing/TimingDiagram";
+import { useSimulation } from "./timing/useSimulation";
+import type { SimulationCycle } from "./timing/useSimulation";
 
 function inputSequenceToText(sequence: Record<string, string>[], inputNames: string[]) {
-  return sequence.map((frame) => inputNames.map((inputName) => frame[inputName]).join("")).join(", ");
+  return sequence.map((frame) => inputNames.map((inputName) => frame[inputName]).join("")).join(" ");
 }
 
-function formatBits(names: string[], values: Record<string, string>) {
-  return names.map((name) => values[name]).join("");
+function statusLabel(cycle: SimulationCycle | null) {
+  return cycle?.result.toUpperCase() ?? "PENDING";
 }
 
 export function TimingDiagramPanel() {
   const { flipFlopType, initialStateBits, modelType, setTimingTrace, stateTable, variables } = useCircuitStore();
-  const [timingSvg, setTimingSvg] = useState("");
-  const [generatedSignature, setGeneratedSignature] = useState("");
-  const [error, setError] = useState("");
-  const [isExportingPng, setIsExportingPng] = useState(false);
-  const [traceSteps, setTraceSteps] = useState<TimingStep[]>([]);
+  const diagramRef = useRef<HTMLDivElement>(null);
   const [inputSequenceText, setInputSequenceText] = useState(() =>
     inputSequenceToText(buildDefaultInputSequence(variables.inputs), variables.inputs),
   );
+  const [isExportingPng, setIsExportingPng] = useState(false);
+  const {
+    currentStep,
+    error,
+    isAutoRunning,
+    jumpToStep,
+    maxStep,
+    reset,
+    runAll,
+    selectedCycle,
+    setSpeedMs,
+    simulation,
+    speedMs,
+    step,
+    toggleAutoRun,
+  } = useSimulation({
+    flipFlopType,
+    initialStateBits,
+    inputSequenceText,
+    modelType,
+    stateTable,
+    variables,
+  });
+  const canUseTiming = Boolean(simulation && !error);
+  const visibleConsoleLines = simulation?.consoleLines.slice(0, currentStep + 1) ?? [];
 
   useEffect(() => {
     setInputSequenceText(inputSequenceToText(buildDefaultInputSequence(variables.inputs), variables.inputs));
   }, [variables.inputs]);
 
-  const currentSignature = useMemo(
-    () =>
-      JSON.stringify({
-        flipFlopType,
-        initialStateBits,
-        inputSequenceText,
-        modelType,
-        stateTable,
-        variables: {
-          inputs: variables.inputs,
-          outputs: variables.outputs,
-          states: variables.states,
-        },
-      }),
-    [flipFlopType, initialStateBits, inputSequenceText, modelType, stateTable, variables.inputs, variables.outputs, variables.states],
-  );
+  useEffect(() => {
+    setTimingTrace(canUseTiming ? simulation?.timingData.steps ?? null : null);
+  }, [canUseTiming, setTimingTrace, simulation?.timingData.steps]);
 
-  const canUseTiming = Boolean(timingSvg);
-  const isOutdated = canUseTiming && generatedSignature !== currentSignature;
-
-  function generateTimingDiagram() {
-    setTimingSvg("");
-    setTraceSteps([]);
-    setTimingTrace(null);
-    setGeneratedSignature("");
-    setError("");
-    try {
-      const inputSequence = parseInputSequence(inputSequenceText, variables.inputs);
-      const initialState = Object.fromEntries(
-        variables.states.map((stateName, index) => [stateName, (initialStateBits[index] ?? "0") as "0" | "1"]),
-      ) as Record<string, "0" | "1">;
-      const timingData = generateTimingData(
-        stateTable,
-        modelType,
-        flipFlopType,
-        variables.states,
-        variables.inputs,
-        variables.outputs,
-        inputSequence,
-        initialState,
-      );
-      console.table(timingStepsToConsoleRows(timingData.steps));
-      setTimingSvg(renderTimingDiagramSVG(timingData));
-      setTraceSteps(timingData.steps);
-      setTimingTrace(timingData.steps);
-      setGeneratedSignature(currentSignature);
-    } catch (generationError) {
-      setTimingSvg("");
-      setTraceSteps([]);
-      setTimingTrace(null);
-      setGeneratedSignature("");
-      setError(
-        generationError instanceof Error
-          ? generationError.message
-          : "Timing diagram generation failed: invalid state table value.",
-      );
-    }
-  }
-
-  function resetTimingDiagram() {
-    setTimingSvg("");
-    setTraceSteps([]);
-    setTimingTrace(null);
-    setGeneratedSignature("");
-    setError("");
+  function serializeDiagram() {
+    const svg = diagramRef.current?.querySelector("svg");
+    return svg ? new XMLSerializer().serializeToString(svg) : null;
   }
 
   async function downloadPng() {
-    if (!timingSvg || isExportingPng) return;
-    setError("");
+    const markup = serializeDiagram();
+    if (!markup || isExportingPng) return;
     setIsExportingPng(true);
     try {
-      await exportTimingPNG(timingSvg);
-    } catch (exportError) {
-      setError(exportError instanceof Error ? exportError.message : "PNG export failed.");
+      await exportTimingPNG(markup);
     } finally {
       setIsExportingPng(false);
     }
   }
 
   function downloadSvg() {
-    if (!timingSvg) return;
-    exportTimingSVG(timingSvg);
+    const markup = serializeDiagram();
+    if (markup) exportTimingSVG(markup);
   }
 
   return (
     <section className="panel timing-panel">
-      <div className="timing-config">
-        <label className="field-label" htmlFor="timing-input-sequence">
-          Input sequence ({variables.inputs.join("")})
-        </label>
-        <input
-          className="text-field"
-          id="timing-input-sequence"
-          onChange={(event) => setInputSequenceText(event.target.value)}
-          value={inputSequenceText}
-        />
-      </div>
+      <div className="timing-toolbar-card">
+        <div className="timing-config timing-config-enhanced">
+          <div className="timing-input-control">
+            <label className="field-label" htmlFor="timing-input-sequence">
+              Input sequence ({variables.inputs.join("") || "X"})
+            </label>
+            <input
+              className="text-field"
+              id="timing-input-sequence"
+              onChange={(event) => setInputSequenceText(event.target.value)}
+              value={inputSequenceText}
+            />
+          </div>
+          <span className={`timing-sim-status ${simulation?.passed ? "pass" : "fail"}`}>
+            {simulation?.passed ? "PASS" : "FAIL"}
+          </span>
+        </div>
 
-      <div className="diagram-tools">
-        <button onClick={generateTimingDiagram} type="button">Generate Timing Diagram</button>
-        <button disabled={!canUseTiming} onClick={resetTimingDiagram} type="button">Reset Timing</button>
-        <button disabled={!canUseTiming || isExportingPng} onClick={downloadPng} type="button">
-          {isExportingPng ? "Exporting..." : "PNG"}
-        </button>
-        <button disabled={!canUseTiming} onClick={downloadSvg} type="button">SVG</button>
+        <SimulationControls
+          canRun={canUseTiming}
+          currentStep={currentStep}
+          isAutoRunning={isAutoRunning}
+          maxStep={maxStep}
+          onReset={reset}
+          onRunAll={runAll}
+          onStep={step}
+          onToggleAutoRun={toggleAutoRun}
+          setSpeedMs={setSpeedMs}
+          speedMs={speedMs}
+        />
+
+        <div className="diagram-tools timing-export-tools">
+          <button disabled={!canUseTiming || isExportingPng} onClick={downloadPng} type="button">
+            {isExportingPng ? "Exporting..." : "PNG"}
+          </button>
+          <button disabled={!canUseTiming} onClick={downloadSvg} type="button">
+            SVG
+          </button>
+        </div>
       </div>
 
       {error ? <div className="diagram-alert error">{error}</div> : null}
-      {isOutdated ? <div className="diagram-alert warning">Timing diagram is outdated. Click Generate Timing Diagram again to update.</div> : null}
 
-      <div className="timing-scroll" id="timing-diagram">
-        {!timingSvg ? (
-          <div className="diagram-placeholder">Click Generate Timing Diagram to create the waveform from the current state table.</div>
+      <div className="timing-scroll interactive-timing-scroll" id="timing-diagram" ref={diagramRef}>
+        {!canUseTiming || !simulation ? (
+          <div className="diagram-placeholder">Timing simulation is unavailable for the current input sequence.</div>
         ) : (
-          <div dangerouslySetInnerHTML={{ __html: timingSvg }} />
+          <TimingDiagram currentStep={currentStep} cycles={simulation.cycles} onSelectStep={jumpToStep} variables={variables} />
         )}
       </div>
 
-      {traceSteps.length ? (
-        <div className="timing-trace">
-          <h2>Debug / Trace Table</h2>
+      {canUseTiming && simulation ? (
+        <div className="timing-simulator-grid">
+          <section className="timing-state-card">
+            <div className="timing-card-header">
+              <h2>State Diagram</h2>
+              <span className={`timing-step-status ${selectedCycle?.result ?? "fail"}`}>{statusLabel(selectedCycle)}</span>
+            </div>
+            <div className="timing-state-flow">
+              <span>{selectedCycle?.actualPresentState ?? "--"}</span>
+              <strong>{selectedCycle?.inputBits ?? "-"}</strong>
+              <span>{selectedCycle?.actualNextState ?? "--"}</span>
+            </div>
+            <dl className="timing-current-values">
+              <div>
+                <dt>Step</dt>
+                <dd>{selectedCycle?.step ?? 0}</dd>
+              </div>
+              <div>
+                <dt>X</dt>
+                <dd>{selectedCycle?.inputBits ?? "-"}</dd>
+              </div>
+              <div>
+                <dt>Z</dt>
+                <dd>{selectedCycle?.actualOutput ?? "-"}</dd>
+              </div>
+              <div>
+                <dt>Next</dt>
+                <dd>{selectedCycle?.actualNextState ?? "--"}</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section className="timing-console-card">
+            <div className="timing-card-header">
+              <h2>Console</h2>
+              <span>{visibleConsoleLines.length}/{simulation.consoleLines.length}</span>
+            </div>
+            <pre className="timing-console">
+              {visibleConsoleLines.map((line, index) => (
+                <span
+                  className={`timing-console-line ${line.startsWith("PASS") ? "pass" : "fail"} ${index === currentStep ? "active" : ""}`}
+                  key={`${line}-${index}`}
+                >
+                  {line}
+                  {"\n"}
+                </span>
+              ))}
+            </pre>
+          </section>
+        </div>
+      ) : null}
+
+      {canUseTiming && simulation ? (
+        <div className="timing-trace interactive-timing-table">
+          <h2>Simulation Table</h2>
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
                   <th>Step</th>
-                  <th>Present State {variables.states.join("")}</th>
-                  <th>{variables.inputs.join("")}</th>
-                  <th>Next State {variables.states.map((state) => `${state}+`).join("")}</th>
-                  <th>{variables.outputs.join("")}</th>
+                  <th>{variables.inputs.join("") || "X"}</th>
+                  <th>Present State</th>
+                  <th>Expected {variables.outputs.join("") || "Z"}</th>
+                  <th>Actual {variables.outputs.join("") || "Z"}</th>
+                  <th>Expected Next State</th>
+                  <th>Actual Next State</th>
+                  <th>Result</th>
                 </tr>
               </thead>
               <tbody>
-                {traceSteps.map((step) => (
-                  <tr key={step.step}>
-                    <td>{step.step}</td>
-                    <td>{formatBits(variables.states, step.currentState)}</td>
-                    <td>{formatBits(variables.inputs, step.input)}</td>
-                    <td>{formatBits(variables.states, step.nextState)}</td>
-                    <td>{formatBits(variables.outputs, step.output)}</td>
+                {simulation.cycles.map((cycle, index) => (
+                  <tr className={index === currentStep ? "active-cycle-row" : ""} key={cycle.step} onClick={() => jumpToStep(index)}>
+                    <td>{cycle.step}</td>
+                    <td>{cycle.inputBits}</td>
+                    <td>{cycle.actualPresentState}</td>
+                    <td>{cycle.expectedOutput}</td>
+                    <td>{cycle.actualOutput}</td>
+                    <td>{cycle.expectedNextState}</td>
+                    <td>{cycle.actualNextState}</td>
+                    <td className={`timing-result-cell ${cycle.result}`}>{cycle.result.toUpperCase()}</td>
                   </tr>
                 ))}
               </tbody>

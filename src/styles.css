@@ -710,6 +710,28 @@ th {
   padding: 0 0 16px;
 }
 
+.timing-panel {
+  --bg-card: #ffffff;
+  --bg-waveform: #fbfdff;
+  --grid-major: #e5ebf3;
+  --grid-minor: #f2f6fb;
+  --signal-clk: #2563eb;
+  --signal-reset: #f59e0b;
+  --signal-digital: #334155;
+  --signal-z: #059669;
+  --cursor: #2563eb;
+  --cycle-highlight: #eaf3ff;
+  --pass-bg: #dcfce7;
+  --pass-border: #22c55e;
+  --pass-text: #166534;
+  --fail-bg: #fee2e2;
+  --fail-border: #ef4444;
+  --fail-text: #991b1b;
+  --debug-bg: #f1f5f9;
+  --debug-border: #cbd5e1;
+  --debug-text: #1f2937;
+}
+
 .diagram-tools {
   display: flex;
   flex-wrap: wrap;
@@ -780,12 +802,129 @@ th {
   display: block;
 }
 
+.timing-toolbar-card {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 16px 20px 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-card);
+  box-shadow: 0 8px 24px rgba(30, 41, 59, 0.08);
+  padding: 12px;
+}
+
 .timing-config {
-  padding: 16px 20px 0;
+  padding: 0;
+}
+
+.timing-config-enhanced {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.timing-input-control {
+  min-width: min(420px, 100%);
+  flex: 1 1 360px;
 }
 
 .timing-config .text-field {
-  max-width: 420px;
+  max-width: none;
+}
+
+.timing-sim-status,
+.timing-step-status {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 5px 8px;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.timing-sim-status.pass,
+.timing-step-status.pass {
+  border-color: var(--pass-border);
+  background: var(--pass-bg);
+  color: var(--pass-text);
+}
+
+.timing-sim-status.fail,
+.timing-step-status.fail {
+  border-color: var(--fail-border);
+  background: var(--fail-bg);
+  color: var(--fail-text);
+}
+
+.simulation-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+  padding: 0;
+}
+
+.simulation-controls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-soft);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 11px;
+  white-space: nowrap;
+}
+
+.simulation-controls button:hover:not(:disabled) {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.simulation-controls button:disabled {
+  color: var(--text-faint);
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.simulation-speed {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.simulation-speed input {
+  width: 130px;
+  accent-color: var(--accent);
+}
+
+.simulation-speed strong {
+  min-width: 48px;
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
+.timing-export-tools {
+  margin-left: auto;
+  padding: 0;
+}
+
+.timing-export-tools button:first-child {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text-soft);
 }
 
 .timing-scroll {
@@ -793,18 +932,219 @@ th {
   max-height: min(72vh, 760px);
   overflow-x: auto;
   overflow-y: auto;
-  margin-top: 14px;
-  background: var(--paper);
+  margin-top: 16px;
+  background: var(--bg-card);
+}
+
+.interactive-timing-scroll {
+  margin-inline: 20px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-card);
+  box-shadow: 0 10px 26px rgba(30, 41, 59, 0.08);
+  overflow: hidden;
 }
 
 .timing-scroll > div {
-  width: max-content;
   min-width: 100%;
 }
 
 .timing-svg {
   display: block;
   max-width: none;
+}
+
+.interactive-timing-svg {
+  display: block;
+  max-width: none;
+}
+
+.interactive-timing-frame {
+  display: grid;
+  grid-template-columns: 136px minmax(0, 1fr);
+  min-width: 100%;
+  background: var(--bg-card);
+}
+
+.timing-label-rail {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  border-right: 1px solid var(--grid-major);
+  background: #f8fafc;
+  box-shadow: 8px 0 14px rgba(148, 163, 184, 0.08);
+}
+
+.timing-label-gutter {
+  border-bottom: 1px solid var(--grid-major);
+}
+
+.timing-signal-label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border-bottom: 1px solid var(--grid-major);
+  color: #374151;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 0 14px;
+  white-space: nowrap;
+}
+
+.timing-signal-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--signal-digital);
+}
+
+.timing-signal-dot-clock {
+  background: var(--signal-clk);
+}
+
+.timing-signal-dot-reset {
+  background: var(--signal-reset);
+}
+
+.timing-signal-dot-bus {
+  background: #94a3b8;
+}
+
+.timing-waveform-viewport {
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: var(--bg-waveform);
+}
+
+.timing-cycle-hitbox {
+  cursor: pointer;
+}
+
+.timing-simulator-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.8fr) minmax(320px, 1.2fr);
+  gap: 14px;
+  padding: 16px 20px 0;
+}
+
+.timing-state-card,
+.timing-console-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.timing-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.timing-card-header h2 {
+  margin: 0;
+}
+
+.timing-card-header span:not(.timing-step-status) {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.timing-state-flow {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 16px 12px;
+}
+
+.timing-state-flow span {
+  display: grid;
+  min-height: 48px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.timing-state-flow strong {
+  display: grid;
+  min-width: 34px;
+  min-height: 34px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #ffffff;
+  font-size: 12px;
+}
+
+.timing-current-values {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0 16px 16px;
+}
+
+.timing-current-values div {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  padding: 9px;
+}
+
+.timing-current-values dt {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.timing-current-values dd {
+  margin: 4px 0 0;
+  color: var(--text);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.timing-console {
+  min-height: 132px;
+  max-height: 240px;
+  margin: 12px;
+  overflow: auto;
+  border: 1px solid #26344d;
+  border-radius: 6px;
+  background: #0f172a;
+  color: #e5edf6;
+  padding: 10px;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.timing-console-line.pass {
+  color: #86efac;
+}
+
+.timing-console-line.fail {
+  color: #fca5a5;
+}
+
+.timing-console-line.active {
+  display: inline-block;
+  width: 100%;
+  background: rgba(37, 99, 235, 0.18);
 }
 
 .timing-trace {
@@ -817,6 +1157,26 @@ th {
 
 .timing-trace table {
   margin-top: 8px;
+}
+
+.interactive-timing-table tbody tr {
+  cursor: pointer;
+}
+
+.interactive-timing-table tbody tr.active-cycle-row td {
+  background: var(--accent-soft);
+}
+
+.timing-result-cell {
+  font-weight: 800;
+}
+
+.timing-result-cell.pass {
+  color: var(--ok-text);
+}
+
+.timing-result-cell.fail {
+  color: var(--err-text);
 }
 
 /* ----- State diagram ----- */
@@ -1286,6 +1646,152 @@ th {
   font-family: inherit;
 }
 
+.code-generator-testbench-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 0.88fr);
+  gap: 12px;
+  margin: 0 16px 10px;
+  min-height: 360px;
+}
+
+.code-block-embedded {
+  margin: 0;
+  min-height: 360px;
+}
+
+.simulation-panel {
+  display: flex;
+  min-width: 0;
+  min-height: 360px;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+
+.simulation-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.simulation-header h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.simulation-status {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 4px 7px;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.simulation-status.pass {
+  border-color: var(--ok-border);
+  background: var(--ok-bg);
+  color: var(--ok-text);
+}
+
+.simulation-status.fail {
+  border-color: var(--err-border);
+  background: var(--err-bg);
+  color: var(--err-text);
+}
+
+.simulation-status.idle {
+  color: var(--text-muted);
+}
+
+.simulation-actions {
+  padding: 10px 12px 0;
+}
+
+.simulation-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 0 11px;
+  white-space: nowrap;
+}
+
+.simulation-actions button:hover {
+  filter: brightness(1.07);
+}
+
+.simulation-error {
+  margin: 10px 12px 0;
+}
+
+.simulation-console {
+  min-height: 114px;
+  max-height: 190px;
+  margin: 10px 12px 12px;
+  overflow: auto;
+  border: 1px solid #26344d;
+  border-radius: 6px;
+  background: #0f172a;
+  color: #e5edf6;
+  padding: 10px;
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 11.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.simulation-console-line.pass {
+  color: #86efac;
+}
+
+.simulation-console-line.fail {
+  color: #fca5a5;
+}
+
+.simulation-console-line.muted {
+  color: #8da2bd;
+}
+
+.simulation-table-wrap {
+  margin: 0 12px 12px;
+  overflow: auto;
+}
+
+.simulation-table {
+  min-width: 680px;
+}
+
+.simulation-table th,
+.simulation-table td {
+  padding: 7px;
+}
+
+.simulation-result-cell {
+  font-weight: 800;
+}
+
+.simulation-result-cell.pass {
+  color: var(--ok-text);
+}
+
+.simulation-result-cell.fail {
+  color: var(--err-text);
+}
+
 .tok-keyword {
   color: #7dd3fc;
   font-weight: 600;
@@ -1384,6 +1890,14 @@ th {
   .excitation-layout {
     grid-template-columns: 1fr;
   }
+
+  .timing-simulator-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .code-generator-testbench-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 760px) {
@@ -1397,6 +1911,19 @@ th {
 
   .field-row {
     grid-template-columns: 1fr;
+  }
+
+  .simulation-speed {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .simulation-speed input {
+    flex: 1;
+  }
+
+  .timing-current-values {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .result-tabs {
