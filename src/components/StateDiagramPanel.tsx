@@ -1,7 +1,8 @@
-import { useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { Pause, Play, Square, StepForward } from "lucide-react";
 import { exportSvgAsPng, exportSvgFile } from "../export/timing";
-import type { LogicValue, ModelType, StateTableRow } from "../types";
+import type { Bit, LogicValue, ModelType, StateTableRow } from "../types";
 import { useCircuitStore } from "../store/useCircuitStore";
 
 interface Point {
@@ -524,18 +525,24 @@ function renderEdgeLabel(label: string, position: Point, key: string) {
   );
 }
 
-function renderEdge(edge: RenderedEdge) {
+function renderEdge(edge: RenderedEdge, activeEdgeKey?: string | null) {
+  const isActive = activeEdgeKey === edge.key;
   return (
     <g key={edge.key}>
-      <path className="state-edge" d={edge.path} markerEnd="url(#state-diagram-arrow)" />
+      <path
+        className={isActive ? "state-edge state-edge-active" : "state-edge"}
+        d={edge.path}
+        markerEnd={isActive ? "url(#state-diagram-arrow-active)" : "url(#state-diagram-arrow)"}
+      />
     </g>
   );
 }
 
-function renderNode(node: DiagramNode, machineType: ModelType) {
+function renderNode(node: DiagramNode, machineType: ModelType, activeStateId?: string | null) {
+  const isActive = activeStateId === node.id;
   return (
     <g className="state-node-group" filter="url(#state-node-shadow)" key={node.id}>
-      <circle className="state-node" cx={node.x} cy={node.y} r={NODE_RADIUS} />
+      <circle className={isActive ? "state-node state-node-active" : "state-node"} cx={node.x} cy={node.y} r={NODE_RADIUS} />
       {machineType === "moore" ? (
         <>
           <text className="state-node-text" textAnchor="middle" x={node.x} y={node.y - 8}>
@@ -591,7 +598,17 @@ function renderInitialStateArrow(node: DiagramNode, center: Point) {
   );
 }
 
-export function renderStateDiagram(stateTable: StateTableRow[], machineType: ModelType, initialStateId?: string): ReactNode {
+export interface DiagramHighlight {
+  activeStateId?: string | null;
+  activeEdgeKey?: string | null;
+}
+
+export function renderStateDiagram(
+  stateTable: StateTableRow[],
+  machineType: ModelType,
+  initialStateId?: string,
+  highlight?: DiagramHighlight,
+): ReactNode {
   const firstRow = stateTable[0];
   const stateNames = orderedKeys(firstRow?.currentState);
   const inputNames = orderedKeys(firstRow?.input);
@@ -628,6 +645,9 @@ export function renderStateDiagram(stateTable: StateTableRow[], machineType: Mod
         <marker id="state-diagram-initial-arrow" markerHeight="8" markerWidth="8" orient="auto" refX="8" refY="4" viewBox="0 0 8 8">
           <path className="state-initial-marker" d="M 0 0 L 8 4 L 0 8 z" />
         </marker>
+        <marker id="state-diagram-arrow-active" markerHeight="8" markerWidth="8" orient="auto" refX="8" refY="4" viewBox="0 0 8 8">
+          <path className="state-active-marker" d="M 0 0 L 8 4 L 0 8 z" />
+        </marker>
         <pattern height="20" id="state-diagram-grid" patternUnits="userSpaceOnUse" width="20">
           <rect fill="white" height="20" width="20" />
           <circle cx="10" cy="10" fill="rgba(100, 116, 139, 0.30)" r="0.9" />
@@ -638,7 +658,7 @@ export function renderStateDiagram(stateTable: StateTableRow[], machineType: Mod
       </defs>
       <rect fill="url(#state-diagram-grid)" height={layout.height} width={layout.width} x="0" y="0" />
       <g className="edges-layer state-edge-layer">
-        {renderedEdges.map(renderEdge)}
+        {renderedEdges.map((edge) => renderEdge(edge, highlight?.activeEdgeKey))}
         {initialStateId && nodeById.has(initialStateId)
           ? renderInitialStateArrow(nodeById.get(initialStateId) as DiagramNode, layout.center)
           : null}
@@ -646,7 +666,9 @@ export function renderStateDiagram(stateTable: StateTableRow[], machineType: Mod
       <g className="labels-layer state-label-layer">
         {renderedEdges.map((edge) => renderEdgeLabel(edge.label, edge.labelPosition, `${edge.key}-label`))}
       </g>
-      <g className="nodes-layer state-node-layer">{layout.nodes.map((node) => renderNode(node, machineType))}</g>
+      <g className="nodes-layer state-node-layer">
+        {layout.nodes.map((node) => renderNode(node, machineType, highlight?.activeStateId))}
+      </g>
     </svg>
   );
 }
@@ -664,14 +686,109 @@ const EXPORT_STYLE = [
   '.state-initial-label{fill:#2563eb;font-family:"Times New Roman",Georgia,serif;font-size:13px;font-style:italic;font-weight:700}',
   ".state-edge-label-bg{fill:rgba(255,255,255,0.86);stroke:rgba(203,213,225,0.8);stroke-width:1px}",
   '.state-edge-label{fill:#111827;font-family:"Times New Roman",Georgia,serif;font-size:18px;font-weight:700}',
+  ".state-node-active{stroke:#2563eb}",
+  ".state-edge-active{stroke:#2563eb;stroke-width:3.25px}",
+  ".state-active-marker{fill:#2563eb}",
 ].join("");
+
+interface SimulationState {
+  bits: string;
+  lastEdge: string | null;
+  lastOutput: string;
+  stepCount: number;
+  history: string[];
+}
+
+const SIM_HISTORY_LIMIT = 14;
+const SIM_PLAY_INTERVAL_MS = 900;
 
 export function StateDiagramPanel() {
   const modelType = useCircuitStore((state) => state.modelType);
   const stateTable = useCircuitStore((state) => state.stateTable);
   const flipFlopType = useCircuitStore((state) => state.flipFlopType);
   const initialStateBits = useCircuitStore((state) => state.initialStateBits);
+  const variables = useCircuitStore((state) => state.variables);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [sim, setSim] = useState<SimulationState | null>(null);
+  const [simInputs, setSimInputs] = useState<Record<string, Bit>>({});
+  const [playing, setPlaying] = useState(false);
+  const [simError, setSimError] = useState("");
+
+  const rowLookup = useMemo(() => {
+    const lookup = new Map<string, StateTableRow>();
+    for (const row of stateTable) {
+      const stateBits = variables.states.map((name) => row.currentState[name] ?? "0").join("");
+      const inputBits = variables.inputs.map((name) => row.input[name] ?? "0").join("");
+      lookup.set(`${stateBits}|${inputBits}`, row);
+    }
+    return lookup;
+  }, [stateTable, variables.states, variables.inputs]);
+
+  const designSignature = useMemo(
+    () => JSON.stringify({ stateTable, modelType, inputs: variables.inputs, initialStateBits }),
+    [stateTable, modelType, variables.inputs, initialStateBits],
+  );
+
+  // Any design edit invalidates the running simulation.
+  useEffect(() => {
+    setSim(null);
+    setPlaying(false);
+    setSimError("");
+  }, [designSignature]);
+
+  function startSimulation() {
+    setSimError("");
+    setSimInputs(Object.fromEntries(variables.inputs.map((name) => [name, "0" as Bit])));
+    setSim({ bits: initialStateBits, lastEdge: null, lastOutput: "", stepCount: 0, history: [initialStateBits] });
+  }
+
+  function stopSimulation() {
+    setSim(null);
+    setPlaying(false);
+    setSimError("");
+  }
+
+  function stepSimulation() {
+    if (!sim) return;
+    const inputBits = variables.inputs.map((name) => simInputs[name] ?? "0").join("");
+    const row = rowLookup.get(`${sim.bits}|${inputBits}`);
+    const nextBits = row ? variables.states.map((name) => row.nextState[name] ?? "-").join("") : "";
+    if (!row || !/^[01]+$/.test(nextBits)) {
+      setSimError(
+        row
+          ? `Transition from state ${sim.bits} with input ${inputBits} uses don't-care bits - complete the state table to simulate it.`
+          : `No state-table row found for state ${sim.bits} with input ${inputBits}.`,
+      );
+      setPlaying(false);
+      return;
+    }
+    const outputBits = variables.outputs.map((name) => row.output[name] ?? "-").join("");
+    setSimError("");
+    setSim({
+      bits: nextBits,
+      lastEdge: `${sim.bits}->${nextBits}`,
+      lastOutput: outputBits,
+      stepCount: sim.stepCount + 1,
+      history: [...sim.history, nextBits].slice(-SIM_HISTORY_LIMIT),
+    });
+  }
+
+  // Auto-play re-arms after every applied step so input toggles take effect mid-run.
+  useEffect(() => {
+    if (!playing || !sim) return;
+    const timer = window.setTimeout(stepSimulation, SIM_PLAY_INTERVAL_MS);
+    return () => window.clearTimeout(timer);
+  });
+
+  const mooreOutput = useMemo(() => {
+    if (!sim || modelType !== "moore") return null;
+    const row = stateTable.find(
+      (candidate) => variables.states.map((name) => candidate.currentState[name] ?? "0").join("") === sim.bits,
+    );
+    return row ? variables.outputs.map((name) => row.output[name] ?? "-").join("") : null;
+  }, [sim, modelType, stateTable, variables.states, variables.outputs]);
+
+  const displayOutput = modelType === "moore" ? mooreOutput ?? "—" : sim?.stepCount ? sim.lastOutput : "—";
 
   function serializeDiagram() {
     const svg = scrollRef.current?.querySelector("svg");
@@ -699,8 +816,70 @@ export function StateDiagramPanel() {
           <button onClick={downloadSvg} type="button">SVG</button>
         </span>
       </h2>
+
+      <div className="sim-bar">
+        {!sim ? (
+          <button className="sim-button sim-primary" onClick={startSimulation} type="button">
+            <Play size={14} />
+            Simulate
+          </button>
+        ) : (
+          <>
+            <button className="sim-button sim-primary" disabled={playing} onClick={stepSimulation} title="Advance one clock edge" type="button">
+              <StepForward size={14} />
+              Step
+            </button>
+            <button className="sim-button" onClick={() => setPlaying((value) => !value)} type="button">
+              {playing ? <Pause size={14} /> : <Play size={14} />}
+              {playing ? "Pause" : "Play"}
+            </button>
+            <button className="sim-button" onClick={stopSimulation} type="button">
+              <Square size={13} />
+              Stop
+            </button>
+            <span className="sim-divider" />
+            {variables.inputs.map((name) => (
+              <button
+                className={`sim-toggle ${simInputs[name] === "1" ? "on" : ""}`}
+                key={name}
+                onClick={() => setSimInputs((current) => ({ ...current, [name]: current[name] === "1" ? "0" : "1" }))}
+                title={`Toggle input ${name}`}
+                type="button"
+              >
+                {name} = {simInputs[name] ?? "0"}
+              </button>
+            ))}
+            <span className="sim-divider" />
+            <span className="sim-readout">
+              State <strong>{sim.bits}</strong>
+            </span>
+            <span className="sim-readout">
+              {variables.outputs.join("")} <strong>{displayOutput}</strong>
+            </span>
+            <span className="sim-readout">
+              Cycle <strong>{sim.stepCount}</strong>
+            </span>
+          </>
+        )}
+      </div>
+
+      {simError ? <div className="diagram-alert error sim-alert">{simError}</div> : null}
+
+      {sim ? (
+        <div className="sim-history" aria-label="Visited states">
+          {sim.history.map((bits, index) => (
+            <span className={`sim-chip ${index === sim.history.length - 1 ? "current" : ""}`} key={`${index}-${bits}`}>
+              {bits}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
       <div className="state-diagram-scroll" ref={scrollRef}>
-        {renderStateDiagram(stateTable, modelType, initialStateBits)}
+        {renderStateDiagram(stateTable, modelType, initialStateBits, {
+          activeStateId: sim?.bits ?? null,
+          activeEdgeKey: sim?.lastEdge ?? null,
+        })}
       </div>
     </section>
   );

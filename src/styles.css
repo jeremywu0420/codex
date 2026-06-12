@@ -406,6 +406,18 @@ select {
 
 .tab-panel.active {
   display: block;
+  animation: panel-in 0.22s ease;
+}
+
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* ----- Panels ----- */
@@ -1273,6 +1285,185 @@ th {
   font-family: "Times New Roman", Georgia, serif;
   font-size: 18px;
   font-weight: 700;
+}
+
+/* ----- Interactive simulator ----- */
+
+.sim-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.sim-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text-soft);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 11px;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.sim-button:hover:not(:disabled) {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.sim-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.sim-button.sim-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+.sim-button.sim-primary:hover:not(:disabled) {
+  color: #ffffff;
+  filter: brightness(1.07);
+}
+
+.sim-toggle {
+  min-height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0 13px;
+  transition: all 0.15s ease;
+}
+
+.sim-toggle.on {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.sim-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+}
+
+.sim-readout {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.sim-readout strong {
+  margin-left: 3px;
+  color: var(--accent);
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 13px;
+}
+
+.sim-alert {
+  margin: 12px 16px 0;
+}
+
+.sim-history {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sim-chip {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  padding: 2px 8px;
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  position: relative;
+}
+
+.sim-chip:not(:last-child)::after {
+  content: "→";
+  position: absolute;
+  right: -10px;
+  color: var(--text-faint);
+}
+
+.sim-chip.current {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+  animation: chip-in 0.25s ease;
+}
+
+@keyframes chip-in {
+  from {
+    transform: scale(0.7);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.state-node-active {
+  stroke: #2563eb;
+  animation: node-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes node-pulse {
+  0%,
+  100% {
+    stroke-width: 4px;
+  }
+  50% {
+    stroke-width: 6.5px;
+  }
+}
+
+.state-edge-active {
+  stroke: #2563eb;
+  stroke-width: 3.25px;
+}
+
+.state-active-marker {
+  fill: #2563eb;
+}
+
+.state-edge {
+  transition: stroke 0.2s ease, stroke-width 0.2s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab-panel.active,
+  .sim-chip.current,
+  .state-node-active {
+    animation: none;
+  }
+
+  body,
+  .sim-button,
+  .sim-toggle,
+  .state-edge {
+    transition: none;
+  }
 }
 
 .state-diagram-placeholder {
