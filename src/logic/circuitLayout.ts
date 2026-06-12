@@ -1253,21 +1253,24 @@ function svgFormulaText(x: number, y: number, label: string, size = 13) {
   return `${mainText}<text x="${x + size * 0.62}" y="${y + size * 1.17}" font-family="Times New Roman" font-size="${size * 0.62}" font-style="italic" font-weight="700" fill="#334155">${escapeXml(sub)}</text>`;
 }
 
+const svgWireColor = "#1e293b";
+const svgClockColor = "#2563eb";
+
 function svgGateBody(node: CircuitNode) {
   if (node.type === "AND") {
-    return `<path d="M${node.x} ${node.y} L${node.x + 44} ${node.y} A22 22 0 0 1 ${node.x + 44} ${node.y + 44} L${node.x} ${node.y + 44} Z" stroke="#64748b" stroke-width="1.45" fill="white"/>`;
+    return `<path d="M${node.x} ${node.y} L${node.x + 44} ${node.y} A22 22 0 0 1 ${node.x + 44} ${node.y + 44} L${node.x} ${node.y + 44} Z" stroke="${svgWireColor}" stroke-width="1.8" stroke-linejoin="round" fill="white"/>`;
   }
   if (node.type === "OR") {
-    return `<path d="M${node.x} ${node.y} Q${node.x + 44} ${node.y + 5} ${node.x + 86} ${node.y + 30} Q${node.x + 44} ${node.y + 55} ${node.x} ${node.y + 60} Q${node.x + 22} ${node.y + 30} ${node.x} ${node.y} Z" stroke="#64748b" stroke-width="1.45" fill="white"/>`;
+    return `<path d="M${node.x} ${node.y} Q${node.x + 48} ${node.y + 2} ${node.x + 86} ${node.y + 30} Q${node.x + 48} ${node.y + 58} ${node.x} ${node.y + 60} Q${node.x + 19} ${node.y + 30} ${node.x} ${node.y} Z" stroke="${svgWireColor}" stroke-width="1.8" stroke-linejoin="round" fill="white"/>`;
   }
   if (node.type === "NOT") {
-    return `<path d="M${node.x} ${node.y} L${node.x + 30} ${node.y + 15} L${node.x} ${node.y + 30} Z" stroke="#64748b" stroke-width="1.35" fill="white"/><circle cx="${node.x + 35}" cy="${node.y + 15}" r="5" stroke="#64748b" stroke-width="1.35" fill="white"/>`;
+    return `<path d="M${node.x} ${node.y} L${node.x + 30} ${node.y + 15} L${node.x} ${node.y + 30} Z" stroke="${svgWireColor}" stroke-width="1.6" stroke-linejoin="round" fill="white"/><circle cx="${node.x + 35}" cy="${node.y + 15}" r="5" stroke="${svgWireColor}" stroke-width="1.6" fill="white"/>`;
   }
   return "";
 }
 
 function svgFlipFlopBody(node: CircuitNode) {
-  return `<rect x="${node.x}" y="${node.y}" width="${node.width ?? ffWidth}" height="${node.height ?? ffHeight}" rx="2" fill="white" stroke="#64748b" stroke-width="1.55"/><polyline points="${node.x + 50},${node.y + 124} ${node.x + 63},${node.y + 112} ${node.x + 76},${node.y + 124}" fill="none" stroke="#64748b" stroke-width="1.35"/>`;
+  return `<rect x="${node.x}" y="${node.y}" width="${node.width ?? ffWidth}" height="${node.height ?? ffHeight}" rx="6" fill="white" stroke="${svgWireColor}" stroke-width="1.8"/><polyline points="${node.x + 50},${node.y + 124} ${node.x + 63},${node.y + 112} ${node.x + 76},${node.y + 124}" fill="none" stroke="${svgClockColor}" stroke-width="1.7" stroke-linejoin="round"/>`;
 }
 
 function flipFlopPinOffset(pin: string) {
@@ -1288,7 +1291,7 @@ function svgNodeLabels(node: CircuitNode) {
       pinLabels,
       svgFormulaText(node.x + 90, node.y + 34, `Q_${state}`, 16),
       svgFormulaText(node.x + 86, node.y + 82, `Q'_${state}`, 16),
-      `<text x="${node.x + 48}" y="${node.y + 143}" font-size="13" fill="#334155">CLK</text>`,
+      `<text x="${node.x + 48}" y="${node.y + 143}" font-size="12" font-weight="700" fill="${svgClockColor}">CLK</text>`,
     ].join("");
   }
   if (node.type === "AND" || node.type === "OR" || node.type === "NOT" || node.type === "STATE" || node.type === "STATE_NOT") return "";
@@ -1310,8 +1313,8 @@ function svgClockLabels(graph: CircuitGraph) {
   if (!graph.clockLine.points.length) return "";
   const [startX, startY, endX, endY] = graph.clockLine.points;
   return [
-    `<text x="${startX + 8}" y="${startY + 24}" font-family="Times New Roman" font-size="16" font-style="italic" fill="#334155">${escapeXml(graph.clockLine.label)}</text>`,
-    `<text x="${endX + 8}" y="${endY + 6}" font-family="Times New Roman" font-size="16" font-style="italic" fill="#334155">${escapeXml(graph.clockLine.label)}</text>`,
+    `<text x="${startX + 8}" y="${startY + 24}" font-family="Times New Roman" font-size="16" font-style="italic" font-weight="700" fill="${svgClockColor}">${escapeXml(graph.clockLine.label)}</text>`,
+    `<text x="${endX + 8}" y="${endY + 6}" font-family="Times New Roman" font-size="16" font-style="italic" font-weight="700" fill="${svgClockColor}">${escapeXml(graph.clockLine.label)}</text>`,
   ].join("");
 }
 
@@ -1319,13 +1322,13 @@ export function circuitGraphToSvg(graph: CircuitGraph, showRoutingBounds = false
   const contentBounds = getCircuitContentBounds(graph);
   const wires = graph.edges
     .filter((edge) => edge.points?.length)
-    .map((edge) => `<polyline data-wire-id="${escapeXml(edge.wireId ?? edge.id ?? "")}" points="${svgPoints(edge.points!)}" fill="none" stroke="#64748b" stroke-width="1.4"/>`)
+    .map((edge) => `<polyline data-wire-id="${escapeXml(edge.wireId ?? edge.id ?? "")}" points="${svgPoints(edge.points!)}" fill="none" stroke="${svgWireColor}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>`)
     .join("");
   const clock = [
-    graph.clockLine.points.length ? `<polyline points="${svgPoints(graph.clockLine.points)}" fill="none" stroke="#64748b" stroke-width="1.45"/>` : "",
+    graph.clockLine.points.length ? `<polyline points="${svgPoints(graph.clockLine.points)}" fill="none" stroke="${svgClockColor}" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"/>` : "",
     ...graph.clockLine.branches.map(
       (branch) =>
-        `<polyline points="${svgPoints(branch)}" fill="none" stroke="#64748b" stroke-width="1.45"/>`,
+        `<polyline points="${svgPoints(branch)}" fill="none" stroke="${svgClockColor}" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"/>`,
     ),
   ].join("");
   const gateBodies = graph.nodes.map(svgGateBody).join("");
@@ -1336,8 +1339,13 @@ export function circuitGraphToSvg(graph: CircuitGraph, showRoutingBounds = false
     ...graph.nodes.map(svgNodeLabels),
   ].join("");
   const junctionDots = [
-    ...graph.clockLine.branches.map((branch) => `<circle class="junction-dot" cx="${branch[0]}" cy="${branch[1]}" r="3" fill="#000000"/>`),
-    ...collectWireJunctionDots(graph).map((point) => `<circle class="junction-dot" cx="${point.x}" cy="${point.y}" r="3" fill="#000000"/>`),
+    ...graph.clockLine.branches.map((branch) => `<circle class="junction-dot" cx="${branch[0]}" cy="${branch[1]}" r="3.2" fill="${svgClockColor}"/>`),
+    ...collectWireJunctionDots(graph).map((point) => `<circle class="junction-dot" cx="${point.x}" cy="${point.y}" r="3.2" fill="${svgWireColor}"/>`),
   ].join("");
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${contentBounds.width}" height="${contentBounds.height}" viewBox="${contentBounds.x} ${contentBounds.y} ${contentBounds.width} ${contentBounds.height}" style="overflow:visible"><rect x="${contentBounds.x}" y="${contentBounds.y}" width="${contentBounds.width}" height="${contentBounds.height}" fill="white"/>${wires}${clock}${gateBodies}${flipFlopBodies}${debugBounds}${junctionDots}${labels}</svg>`;
+  const gridDefs =
+    `<defs><pattern id="circuit-grid" width="20" height="20" patternUnits="userSpaceOnUse">` +
+    `<rect width="20" height="20" fill="white"/>` +
+    `<circle cx="10" cy="10" r="0.9" fill="rgba(100, 116, 139, 0.30)"/>` +
+    `</pattern></defs>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${contentBounds.width}" height="${contentBounds.height}" viewBox="${contentBounds.x} ${contentBounds.y} ${contentBounds.width} ${contentBounds.height}" style="overflow:visible">${gridDefs}<rect x="${contentBounds.x}" y="${contentBounds.y}" width="${contentBounds.width}" height="${contentBounds.height}" fill="url(#circuit-grid)"/>${wires}${clock}${gateBodies}${flipFlopBodies}${debugBounds}${junctionDots}${labels}</svg>`;
 }

@@ -5,8 +5,32 @@ import { circuitGraphToSvg, collectWireJunctionDots, expandBounds, getCircuitCon
 import { useCircuitStore } from "../store/useCircuitStore";
 import type { CircuitBounds, CircuitGraph, CircuitNode, Equation, FlipFlopType } from "../types";
 
-const wire = "#64748b";
-const ink = "#334155";
+const wire = "#1e293b";
+const ink = "#1e293b";
+const clockColor = "#2563eb";
+const gateStrokeWidth = 1.8;
+const bodyShadow = {
+  shadowColor: "rgba(15, 23, 42, 0.22)",
+  shadowBlur: 5,
+  shadowOffsetX: 0,
+  shadowOffsetY: 1.5,
+};
+
+function makeGridPattern() {
+  if (typeof document === "undefined") return null;
+  const tile = document.createElement("canvas");
+  tile.width = 20;
+  tile.height = 20;
+  const context = tile.getContext("2d");
+  if (!context) return null;
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, 20, 20);
+  context.fillStyle = "rgba(100, 116, 139, 0.30)";
+  context.beginPath();
+  context.arc(10, 10, 0.9, 0, Math.PI * 2);
+  context.fill();
+  return tile;
+}
 
 const ffPinsByType: Record<FlipFlopType, string[]> = {
   jk: ["J", "K"],
@@ -35,8 +59,8 @@ function FormulaText({ x, y, label, size = 13 }: { x: number; y: number; label: 
   );
 }
 
-function Junction({ x, y }: { x: number; y: number }) {
-  return <Circle x={x} y={y} radius={3} fill="#000000" />;
+function Junction({ x, y, color = wire }: { x: number; y: number; color?: string }) {
+  return <Circle x={x} y={y} radius={3.2} fill={color} />;
 }
 
 function pointKey(point: { x: number; y: number }) {
@@ -46,7 +70,14 @@ function pointKey(point: { x: number; y: number }) {
 function AndGate({ node }: { node: CircuitNode }) {
   return (
     <Group x={node.x} y={node.y}>
-      <Path data="M0 0 L44 0 A22 22 0 0 1 44 44 L0 44 Z" stroke={wire} strokeWidth={1.45} fill="white" />
+      <Path
+        data="M0 0 L44 0 A22 22 0 0 1 44 44 L0 44 Z"
+        stroke={wire}
+        strokeWidth={gateStrokeWidth}
+        fill="white"
+        lineJoin="round"
+        {...bodyShadow}
+      />
     </Group>
   );
 }
@@ -54,7 +85,14 @@ function AndGate({ node }: { node: CircuitNode }) {
 function OrGate({ node }: { node: CircuitNode }) {
   return (
     <Group x={node.x} y={node.y}>
-      <Path data="M0 0 Q44 5 86 30 Q44 55 0 60 Q22 30 0 0 Z" stroke={wire} strokeWidth={1.45} fill="white" />
+      <Path
+        data="M0 0 Q48 2 86 30 Q48 58 0 60 Q19 30 0 0 Z"
+        stroke={wire}
+        strokeWidth={gateStrokeWidth}
+        fill="white"
+        lineJoin="round"
+        {...bodyShadow}
+      />
     </Group>
   );
 }
@@ -62,8 +100,16 @@ function OrGate({ node }: { node: CircuitNode }) {
 function NotGate({ node }: { node: CircuitNode }) {
   return (
     <Group>
-      <Line points={[node.x, node.y, node.x + 30, node.y + 15, node.x, node.y + 30, node.x, node.y]} stroke={wire} strokeWidth={1.35} closed fill="white" />
-      <Circle x={node.x + 35} y={node.y + 15} radius={5} stroke={wire} strokeWidth={1.35} fill="white" />
+      <Line
+        points={[node.x, node.y, node.x + 30, node.y + 15, node.x, node.y + 30, node.x, node.y]}
+        stroke={wire}
+        strokeWidth={1.6}
+        closed
+        fill="white"
+        lineJoin="round"
+        {...bodyShadow}
+      />
+      <Circle x={node.x + 35} y={node.y + 15} radius={5} stroke={wire} strokeWidth={1.6} fill="white" />
     </Group>
   );
 }
@@ -71,8 +117,23 @@ function NotGate({ node }: { node: CircuitNode }) {
 function FlipFlopBody({ node }: { node: CircuitNode }) {
   return (
     <Group>
-      <Rect x={node.x} y={node.y} width={node.width ?? 126} height={node.height ?? 124} cornerRadius={2} fill="white" stroke={wire} strokeWidth={1.55} />
-      <Line points={[node.x + 50, node.y + 124, node.x + 63, node.y + 112, node.x + 76, node.y + 124]} stroke={wire} strokeWidth={1.35} />
+      <Rect
+        x={node.x}
+        y={node.y}
+        width={node.width ?? 126}
+        height={node.height ?? 124}
+        cornerRadius={6}
+        fill="white"
+        stroke={wire}
+        strokeWidth={gateStrokeWidth}
+        {...bodyShadow}
+      />
+      <Line
+        points={[node.x + 50, node.y + 124, node.x + 63, node.y + 112, node.x + 76, node.y + 124]}
+        stroke={clockColor}
+        strokeWidth={1.7}
+        lineJoin="round"
+      />
     </Group>
   );
 }
@@ -95,7 +156,7 @@ function FlipFlopLabels({ node }: { node: CircuitNode }) {
       ))}
       <FormulaText x={node.x + 90} y={node.y + 34} label={`Q_${state}`} size={16} />
       <FormulaText x={node.x + 86} y={node.y + 82} label={`Q'_${state}`} size={16} />
-      <Text text="CLK" x={node.x + 48} y={node.y + 130} fontSize={13} fill={ink} />
+      <Text text="CLK" x={node.x + 48} y={node.y + 130} fontSize={12} fontStyle="bold" fill={clockColor} />
     </Group>
   );
 }
@@ -143,8 +204,8 @@ function ClockLabels({ graph }: { graph: CircuitGraph }) {
   const [startX, startY, endX, endY] = graph.clockLine.points;
   return (
     <>
-      <Text text={graph.clockLine.label} x={startX + 8} y={startY + 8} fontFamily="Times New Roman" fontSize={16} fontStyle="italic" fill={ink} />
-      <Text text={graph.clockLine.label} x={endX + 8} y={endY - 10} fontFamily="Times New Roman" fontSize={16} fontStyle="italic" fill={ink} />
+      <Text text={graph.clockLine.label} x={startX + 8} y={startY + 8} fontFamily="Times New Roman" fontSize={16} fontStyle="bold italic" fill={clockColor} />
+      <Text text={graph.clockLine.label} x={endX + 8} y={endY - 10} fontFamily="Times New Roman" fontSize={16} fontStyle="bold italic" fill={clockColor} />
     </>
   );
 }
@@ -165,15 +226,19 @@ function RenderCircuitDiagram({ graph, showRoutingBounds = false }: { graph: Cir
             name="circuit-wire"
             points={edge.points}
             stroke={wire}
-            strokeWidth={1.25}
+            strokeWidth={1.6}
+            lineJoin="round"
+            lineCap="round"
             {...{ "data-wire-id": edge.wireId }}
           />
         ) : null,
       )}
-      {graph.clockLine.points.length ? <Line points={graph.clockLine.points} stroke={wire} strokeWidth={1.45} /> : null}
+      {graph.clockLine.points.length ? (
+        <Line points={graph.clockLine.points} stroke={clockColor} strokeWidth={1.7} lineJoin="round" lineCap="round" />
+      ) : null}
       {graph.clockLine.branches.map((branch, index) => (
         <Group key={`clock-${index}-line`}>
-          <Line points={branch} stroke={wire} strokeWidth={1.45} />
+          <Line points={branch} stroke={clockColor} strokeWidth={1.7} lineJoin="round" lineCap="round" />
         </Group>
       ))}
       {/* gate body layer */}
@@ -187,7 +252,7 @@ function RenderCircuitDiagram({ graph, showRoutingBounds = false }: { graph: Cir
       {showRoutingBounds ? <RoutingBounds bounds={graph.metadata.routingBounds ?? []} /> : null}
       {/* junction dots layer */}
       {graph.clockLine.branches.map((branch, index) => (
-        <Junction key={`clock-${index}-dot`} x={branch[0]} y={branch[1]} />
+        <Junction color={clockColor} key={`clock-${index}-dot`} x={branch[0]} y={branch[1]} />
       ))}
       {junctionDots.map((point) => (
         <Junction key={`junction-${pointKey(point)}`} x={point.x} y={point.y} />
@@ -296,6 +361,7 @@ export function CircuitDiagram({ showRoutingBounds = false }: CircuitDiagramProp
     () => JSON.stringify({ equations, flipFlopType, variables }),
     [equations, flipFlopType, variables],
   );
+  const gridTile = useMemo(makeGridPattern, []);
   const contentBounds = useMemo(() => (graph ? getCircuitContentBounds(graph) : null), [graph]);
   const isOutdated = Boolean(graph && generatedSignature !== currentSignature);
   const canUseDiagram = Boolean(graph);
@@ -400,7 +466,18 @@ export function CircuitDiagram({ showRoutingBounds = false }: CircuitDiagramProp
             y={position.y}
           >
             <Layer x={-contentBounds.x} y={-contentBounds.y}>
-              <Rect x={contentBounds.x} y={contentBounds.y} width={contentBounds.width} height={contentBounds.height} fill="white" />
+              {gridTile ? (
+                <Rect
+                  x={contentBounds.x}
+                  y={contentBounds.y}
+                  width={contentBounds.width}
+                  height={contentBounds.height}
+                  fillPatternImage={gridTile as unknown as HTMLImageElement}
+                  fillPatternRepeat="repeat"
+                />
+              ) : (
+                <Rect x={contentBounds.x} y={contentBounds.y} width={contentBounds.width} height={contentBounds.height} fill="white" />
+              )}
               <RenderCircuitDiagram graph={graph} showRoutingBounds={showRoutingBounds} />
             </Layer>
           </Stage>
