@@ -1,5 +1,6 @@
-import { Suspense, lazy, useEffect, useState } from "react";
-import { CircuitBoard, Eraser, FlaskConical, Moon, Redo2, RotateCcw, Sun, Undo2 } from "lucide-react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
+import { CircuitBoard, Eraser, FileDown, FileUp, FlaskConical, Link2, Moon, Redo2, RotateCcw, Sun, Undo2 } from "lucide-react";
+import { encodeWorkspaceHash } from "./lib/workspace";
 import { CodeGeneratorPanel } from "./components/CodeGeneratorPanel";
 import { EquationDisplay } from "./components/EquationDisplay";
 import { ExcitationTablePanel } from "./components/ExcitationTablePanel";
@@ -43,11 +44,56 @@ function loadInitialTheme(): "light" | "dark" {
 }
 
 export default function App() {
-  const { variables, modelType, flipFlopType, lint, verification, history, future, loadExample, clearTable, resetAll, undo, redo } =
-    useCircuitStore();
+  const {
+    variables,
+    modelType,
+    flipFlopType,
+    stateTable,
+    initialStateBits,
+    lint,
+    verification,
+    history,
+    future,
+    loadExample,
+    importWorkspace,
+    exportWorkspace,
+    clearTable,
+    resetAll,
+    undo,
+    redo,
+  } = useCircuitStore();
   const [activeTab, setActiveTab] = useState<TabId>("state");
   const [selectedExample, setSelectedExample] = useState(examplePresets[0].id);
   const [theme, setTheme] = useState<"light" | "dark">(loadInitialTheme);
+  const [importError, setImportError] = useState("");
+  const [shareCopied, setShareCopied] = useState(false);
+  const importInputRef = useRef<HTMLInputElement>(null);
+
+  function exportDesignFile() {
+    const link = document.createElement("a");
+    link.download = "design.scs.json";
+    link.href = URL.createObjectURL(new Blob([exportWorkspace()], { type: "application/json;charset=utf-8" }));
+    link.click();
+    URL.revokeObjectURL(link.href);
+  }
+
+  async function importDesignFile(file: File | undefined) {
+    if (!file) return;
+    const text = await file.text();
+    setImportError(importWorkspace(text) ? "" : `"${file.name}" is not a valid Sequential Circuit Studio design file.`);
+  }
+
+  async function copyShareLink() {
+    const hash = encodeWorkspaceHash({ modelType, flipFlopType, variables, stateTable, initialStateBits });
+    const url = `${window.location.origin}${window.location.pathname}${hash}`;
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      window.prompt("Copy this share link:", url);
+    }
+    setShareCopied(true);
+    window.setTimeout(() => setShareCopied(false), 1400);
+  }
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -134,6 +180,41 @@ export default function App() {
               </button>
             </div>
             <p className="autosave-note">Changes are saved to this browser automatically.</p>
+          </section>
+
+          <section className="control-block sidebar-actions">
+            <p className="control-title">5. Design File</p>
+            <div className="action-row">
+              <button className="action-button" onClick={exportDesignFile} title="Download the current design as JSON" type="button">
+                <FileDown size={14} />
+                Export JSON
+              </button>
+              <button
+                className="action-button"
+                onClick={() => importInputRef.current?.click()}
+                title="Load a previously exported design file"
+                type="button"
+              >
+                <FileUp size={14} />
+                Import JSON
+              </button>
+              <button className="action-button" onClick={copyShareLink} title="Copy a URL that encodes this design" type="button">
+                <Link2 size={14} />
+                {shareCopied ? "Link Copied" : "Share Link"}
+              </button>
+              <input
+                accept=".json,application/json"
+                hidden
+                onChange={(event) => {
+                  void importDesignFile(event.target.files?.[0]);
+                  event.target.value = "";
+                }}
+                ref={importInputRef}
+                type="file"
+              />
+            </div>
+            {importError ? <div className="diagram-alert error field-alert">{importError}</div> : null}
+            <p className="autosave-note">Share links encode the whole design in the URL — no server involved.</p>
           </section>
         </aside>
 

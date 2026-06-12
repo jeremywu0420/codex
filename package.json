@@ -1,6 +1,25 @@
 {
-  "name": "logic-circuit-simulator",
-  "version": "0.1.0",
+  "name": "sequential-circuit-studio",
+  "version": "1.0.0",
+  "description": "Client-side EDA workbench for sequential circuit design: state tables to state diagrams, excitation tables, K-maps, circuit schematics, timing diagrams and Verilog.",
+  "keywords": [
+    "eda",
+    "digital-logic",
+    "fsm",
+    "mealy",
+    "moore",
+    "flip-flop",
+    "verilog",
+    "k-map",
+    "state-machine",
+    "timing-diagram"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jeremywu0420/codex.git"
+  },
+  "homepage": "https://jeremywu0420.github.io/codex/",
   "private": true,
   "type": "module",
   "scripts": {

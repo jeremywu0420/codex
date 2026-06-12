@@ -8,18 +8,12 @@ import { verifyAllResults } from "../lib/verification";
 import type { VerificationResult } from "../lib/verification";
 import { lintDesign } from "../lib/designLint";
 import type { DesignLintResult } from "../lib/designLint";
+import { decodeWorkspaceHash, parseWorkspaceJson, serializeWorkspace } from "../lib/workspace";
+import type { WorkspaceSnapshot } from "../lib/workspace";
 import { exampleToStateTable, findExample } from "../examples";
 
 const WORKSPACE_STORAGE_KEY = "scs-workspace-v1";
 const HISTORY_LIMIT = 50;
-
-interface WorkspaceSnapshot {
-  modelType: ModelType;
-  flipFlopType: FlipFlopType;
-  variables: Variables;
-  stateTable: StateTableRow[];
-  initialStateBits: string;
-}
 
 interface CircuitState extends WorkspaceSnapshot {
   nextStateEquations: Equation[];
@@ -41,6 +35,8 @@ interface CircuitState extends WorkspaceSnapshot {
   updateRow: (rowId: string, patch: Partial<StateTableRow>) => void;
   updateMooreOutput: (rowId: string, outputName: string, value: LogicValue) => void;
   loadExample: (exampleId: string) => void;
+  importWorkspace: (text: string) => boolean;
+  exportWorkspace: () => string;
   clearTable: () => void;
   resetAll: () => void;
   undo: () => void;
@@ -265,36 +261,38 @@ function snapshotOf(state: WorkspaceSnapshot): WorkspaceSnapshot {
 function saveWorkspace(snapshot: WorkspaceSnapshot) {
   try {
     if (typeof window === "undefined" || !window.localStorage) return;
-    window.localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(snapshot));
+    window.localStorage.setItem(WORKSPACE_STORAGE_KEY, serializeWorkspace(snapshot));
   } catch {
     // Quota/security errors must never break the app.
   }
 }
 
-function loadWorkspace(): WorkspaceSnapshot | null {
+/** Rebuilds the state table against the validated variable lists so partial or stale rows degrade to defaults. */
+function normalizeSnapshot(raw: WorkspaceSnapshot): WorkspaceSnapshot {
+  const variables: Variables = { ...raw.variables, states: initialVariables.states, clock: initialVariables.clock };
+  const stateTable = buildStateTable(variables, raw.stateTable, variables);
+  const initialStateBits =
+    raw.initialStateBits.length === variables.states.length ? raw.initialStateBits : defaultInitialStateBits(variables);
+  return { modelType: raw.modelType, flipFlopType: raw.flipFlopType, variables, stateTable, initialStateBits };
+}
+
+function loadWorkspaceFromStorage(): WorkspaceSnapshot | null {
   try {
     if (typeof window === "undefined" || !window.localStorage) return null;
     const raw = window.localStorage.getItem(WORKSPACE_STORAGE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<WorkspaceSnapshot>;
-    if (!parsed || typeof parsed !== "object") return null;
-    if (parsed.modelType !== "mealy" && parsed.modelType !== "moore") return null;
-    if (!parsed.flipFlopType || !["jk", "t", "sr", "d"].includes(parsed.flipFlopType)) return null;
-    if (!parsed.variables || !Array.isArray(parsed.variables.inputs) || !Array.isArray(parsed.variables.outputs)) return null;
-    if (!Array.isArray(parsed.stateTable)) return null;
-    const variables: Variables = {
-      inputs: parsed.variables.inputs.filter((name): name is string => typeof name === "string" && /^[A-Za-z][A-Za-z0-9]*$/.test(name)),
-      states: initialVariables.states,
-      outputs: parsed.variables.outputs.filter((name): name is string => typeof name === "string" && /^[A-Za-z][A-Za-z0-9]*$/.test(name)),
-      clock: initialVariables.clock,
-    };
-    if (!variables.inputs.length || !variables.outputs.length) return null;
-    const stateTable = buildStateTable(variables, parsed.stateTable as StateTableRow[], variables);
-    const initialStateBits =
-      typeof parsed.initialStateBits === "string" && /^[01]+$/.test(parsed.initialStateBits) && parsed.initialStateBits.length === variables.states.length
-        ? parsed.initialStateBits
-        : defaultInitialStateBits(variables);
-    return { modelType: parsed.modelType, flipFlopType: parsed.flipFlopType, variables, stateTable, initialStateBits };
+    const parsed = parseWorkspaceJson(raw);
+    return parsed ? normalizeSnapshot(parsed) : null;
+  } catch {
+    return null;
+  }
+}
+
+function loadWorkspaceFromShareLink(): WorkspaceSnapshot | null {
+  try {
+    if (typeof window === "undefined" || !window.location?.hash) return null;
+    const parsed = decodeWorkspaceHash(window.location.hash);
+    return parsed ? normalizeSnapshot(parsed) : null;
   } catch {
     return null;
   }
@@ -317,7 +315,8 @@ const factorySnapshot: WorkspaceSnapshot = {
   initialStateBits: defaultInitialStateBits(initialVariables),
 };
 
-const startupSnapshot = loadWorkspace() ?? factorySnapshot;
+// Share links take priority over the autosaved workspace, then factory defaults.
+const startupSnapshot = loadWorkspaceFromShareLink() ?? loadWorkspaceFromStorage() ?? factorySnapshot;
 const initialComputed = compute(
   startupSnapshot.modelType,
   startupSnapshot.flipFlopType,
@@ -403,6 +402,13 @@ export const useCircuitStore = create<CircuitState>((set, get) => {
         initialStateBits: example.initialStateBits,
       });
     },
+    importWorkspace: (text) => {
+      const parsed = parseWorkspaceJson(text);
+      if (!parsed) return false;
+      commit(normalizeSnapshot(parsed));
+      return true;
+    },
+    exportWorkspace: () => serializeWorkspace(snapshotOf(get())),
     clearTable: () => {
       const variables = get().variables;
       const stateTable = get().stateTable.map((row) => ({
