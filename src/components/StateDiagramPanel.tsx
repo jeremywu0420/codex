@@ -1,4 +1,6 @@
+import { useRef } from "react";
 import type { ReactNode } from "react";
+import { exportSvgAsPng, exportSvgFile } from "../export/timing";
 import type { LogicValue, ModelType, StateTableRow } from "../types";
 import { useCircuitStore } from "../store/useCircuitStore";
 
@@ -532,7 +534,7 @@ function renderEdge(edge: RenderedEdge) {
 
 function renderNode(node: DiagramNode, machineType: ModelType) {
   return (
-    <g className="state-node-group" key={node.id}>
+    <g className="state-node-group" filter="url(#state-node-shadow)" key={node.id}>
       <circle className="state-node" cx={node.x} cy={node.y} r={NODE_RADIUS} />
       {machineType === "moore" ? (
         <>
@@ -565,12 +567,27 @@ function renderInitialStateArrow(node: DiagramNode, center: Point) {
     x: node.x + direction.x * (NODE_RADIUS + 34),
     y: node.y + direction.y * (NODE_RADIUS + 34),
   };
+  const labelAnchor = {
+    x: node.x + direction.x * (NODE_RADIUS + 48),
+    y: node.y + direction.y * (NODE_RADIUS + 48),
+  };
   return (
-    <path
-      className="state-initial-arrow"
-      d={`M ${pathPoint(tail)} L ${pathPoint(tip)}`}
-      markerEnd="url(#state-diagram-arrow)"
-    />
+    <g>
+      <path
+        className="state-initial-arrow"
+        d={`M ${pathPoint(tail)} L ${pathPoint(tip)}`}
+        markerEnd="url(#state-diagram-initial-arrow)"
+      />
+      <text
+        className="state-initial-label"
+        dominantBaseline="middle"
+        textAnchor="middle"
+        x={numberValue(labelAnchor.x)}
+        y={numberValue(labelAnchor.y)}
+      >
+        start
+      </text>
+    </g>
   );
 }
 
@@ -608,7 +625,18 @@ export function renderStateDiagram(stateTable: StateTableRow[], machineType: Mod
         <marker id="state-diagram-arrow" markerHeight="8" markerWidth="8" orient="auto" refX="8" refY="4" viewBox="0 0 8 8">
           <path className="state-edge-marker" d="M 0 0 L 8 4 L 0 8 z" />
         </marker>
+        <marker id="state-diagram-initial-arrow" markerHeight="8" markerWidth="8" orient="auto" refX="8" refY="4" viewBox="0 0 8 8">
+          <path className="state-initial-marker" d="M 0 0 L 8 4 L 0 8 z" />
+        </marker>
+        <pattern height="20" id="state-diagram-grid" patternUnits="userSpaceOnUse" width="20">
+          <rect fill="white" height="20" width="20" />
+          <circle cx="10" cy="10" fill="rgba(100, 116, 139, 0.30)" r="0.9" />
+        </pattern>
+        <filter id="state-node-shadow" height="140%" width="140%" x="-20%" y="-20%">
+          <feDropShadow dx="0" dy="1.5" floodColor="rgba(15, 23, 42, 0.25)" stdDeviation="2" />
+        </filter>
       </defs>
+      <rect fill="url(#state-diagram-grid)" height={layout.height} width={layout.width} x="0" y="0" />
       <g className="edges-layer state-edge-layer">
         {renderedEdges.map(renderEdge)}
         {initialStateId && nodeById.has(initialStateId)
@@ -623,19 +651,57 @@ export function renderStateDiagram(stateTable: StateTableRow[], machineType: Mod
   );
 }
 
+// Styles inlined into exported SVG files so they render outside the app's stylesheet.
+const EXPORT_STYLE = [
+  ".state-node{fill:#ffffff;stroke:#dc2626;stroke-width:4px}",
+  '.state-node-text{fill:#111827;font-family:"Times New Roman",Georgia,serif;font-size:22px;font-weight:700}',
+  ".state-node-text-single{font-size:24px}",
+  ".state-node-divider{stroke:#111827;stroke-linecap:round;stroke-width:2px}",
+  ".state-edge{fill:none;stroke:#111827;stroke-linecap:round;stroke-width:2.25px}",
+  ".state-edge-marker{fill:#111827}",
+  ".state-initial-arrow{fill:none;stroke:#2563eb;stroke-linecap:round;stroke-width:2.5px}",
+  ".state-initial-marker{fill:#2563eb}",
+  '.state-initial-label{fill:#2563eb;font-family:"Times New Roman",Georgia,serif;font-size:13px;font-style:italic;font-weight:700}',
+  ".state-edge-label-bg{fill:rgba(255,255,255,0.86);stroke:rgba(203,213,225,0.8);stroke-width:1px}",
+  '.state-edge-label{fill:#111827;font-family:"Times New Roman",Georgia,serif;font-size:18px;font-weight:700}',
+].join("");
+
 export function StateDiagramPanel() {
   const modelType = useCircuitStore((state) => state.modelType);
   const stateTable = useCircuitStore((state) => state.stateTable);
   const flipFlopType = useCircuitStore((state) => state.flipFlopType);
   const initialStateBits = useCircuitStore((state) => state.initialStateBits);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  function serializeDiagram() {
+    const svg = scrollRef.current?.querySelector("svg");
+    if (!svg) return null;
+    return new XMLSerializer().serializeToString(svg).replace("<defs>", `<defs><style>${EXPORT_STYLE}</style>`);
+  }
+
+  function downloadSvg() {
+    const markup = serializeDiagram();
+    if (markup) exportSvgFile(markup, "state_diagram.svg");
+  }
+
+  async function downloadPng() {
+    const markup = serializeDiagram();
+    if (markup) await exportSvgAsPng(markup, "state_diagram.png");
+  }
 
   return (
     <section className="panel state-diagram-panel" data-flip-flop-type={flipFlopType}>
       <h2>
         State Diagram ({modelType === "moore" ? "Moore" : "Mealy"})
         <span className="panel-hint">{modelType === "moore" ? "node: state / output" : "edge label: input / output"}</span>
+        <span className="panel-header-actions">
+          <button onClick={downloadPng} type="button">PNG</button>
+          <button onClick={downloadSvg} type="button">SVG</button>
+        </span>
       </h2>
-      <div className="state-diagram-scroll">{renderStateDiagram(stateTable, modelType, initialStateBits)}</div>
+      <div className="state-diagram-scroll" ref={scrollRef}>
+        {renderStateDiagram(stateTable, modelType, initialStateBits)}
+      </div>
     </section>
   );
 }

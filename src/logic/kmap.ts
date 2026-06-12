@@ -1,6 +1,6 @@
 import type { Equation, KMapCell, KMapGroup, KMapModel, LogicValue } from "../types";
 
-function grayOrder(width: number): string[] {
+export function grayOrder(width: number): string[] {
   if (width <= 0) return [""];
   if (width === 1) return ["0", "1"];
   const previous = grayOrder(width - 1);
@@ -50,13 +50,44 @@ export function buildKMap(equation: Equation): KMapModel {
   };
 }
 
+/**
+ * Checks whether a product term (e.g. "A'BX") covers the cell whose variable
+ * assignment is given by `bits` (one bit per name in `variableNames`).
+ * Variable names are matched longest-first so multi-character names work.
+ */
+export function termCoversAssignment(term: string, variableNames: string[], bits: string): boolean {
+  if (term === "1") return true;
+  const namesByLength = [...variableNames].sort((first, second) => second.length - first.length);
+  let position = 0;
+  while (position < term.length) {
+    const name = namesByLength.find((candidate) => term.startsWith(candidate, position));
+    if (!name) return false;
+    position += name.length;
+    let negated = false;
+    if (term[position] === "'") {
+      negated = true;
+      position += 1;
+    }
+    const bit = bits[variableNames.indexOf(name)];
+    if ((bit === "1") === negated) return false;
+  }
+  return true;
+}
+
+function mintermBits(minterm: number, width: number) {
+  return minterm.toString(2).padStart(width, "0");
+}
+
 export function groupKMap(equation: Equation, cells: KMapCell[]): KMapGroup[] {
+  const width = equation.variableNames.length;
   return equation.expression
     .split(" + ")
     .filter((term) => term && term !== "0")
     .map((term, index) => ({
       id: `${equation.id}-group-${index}`,
       term,
-      cells: cells.filter((cell) => equation.minterms.includes(cell.minterm)).map((cell) => cell.minterm),
+      cells: cells
+        .filter((cell) => termCoversAssignment(term, equation.variableNames, mintermBits(cell.minterm, width)))
+        .map((cell) => cell.minterm),
     }));
 }

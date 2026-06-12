@@ -14,11 +14,19 @@ function getSvgSize(svg: string) {
   return { width, height };
 }
 
+export function exportSvgFile(svg: string, fileName: string) {
+  downloadBlob(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }), fileName);
+}
+
 export function exportTimingSVG(svg: string) {
-  downloadBlob(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }), "timing_diagram.svg");
+  exportSvgFile(svg, "timing_diagram.svg");
 }
 
 export async function exportTimingPNG(svg: string) {
+  return exportSvgAsPng(svg, "timing_diagram.png");
+}
+
+export async function exportSvgAsPng(svg: string, fileName: string) {
   const { width, height } = getSvgSize(svg);
   const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -42,7 +50,7 @@ export async function exportTimingPNG(svg: string) {
         context.drawImage(image, 0, 0);
 
         const link = document.createElement("a");
-        link.download = "timing_diagram.png";
+        link.download = fileName;
         link.href = canvas.toDataURL("image/png");
         link.click();
         resolve();

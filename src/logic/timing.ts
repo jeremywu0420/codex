@@ -340,7 +340,7 @@ export function renderTimingDiagramSVG(data: TimingData, options: TimingLayoutOp
       const labelY = rowTop + 29;
       const wavePath =
         signal.type === "clock"
-          ? `<path d="${buildClockPath(data.cycleCount, x0, yHigh, yLow, cycleWidth)}" fill="none" stroke="#0f172a" stroke-width="2.2" stroke-linejoin="miter" stroke-linecap="square" />`
+          ? `<path d="${buildClockPath(data.cycleCount, x0, yHigh, yLow, cycleWidth)}" fill="none" stroke="#2563eb" stroke-width="2.2" stroke-linejoin="miter" stroke-linecap="square" />`
           : renderDigitalSignal(signal.values, x0, yHigh, yLow, cycleWidth);
 
       return [
@@ -360,7 +360,8 @@ export function renderTimingDiagramSVG(data: TimingData, options: TimingLayoutOp
     `<svg class="timing-svg" xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Timing Diagram">`,
     `<title>Timing Diagram</title>`,
     `<rect width="${width}" height="${height}" fill="#ffffff" />`,
-    `<rect x="0" y="0" width="${labelWidth}" height="${height}" fill="#ffffff" />`,
+    `<rect x="0" y="0" width="${labelWidth}" height="${height}" fill="#f8fafc" />`,
+    `<line x1="${labelWidth}" y1="0" x2="${labelWidth}" y2="${height}" stroke="#e2e8f0" stroke-width="1" />`,
     risingEdges,
     rows,
     `<line x1="${x0}" y1="${rowAreaBottom + 8}" x2="${x0 + data.cycleCount * cycleWidth}" y2="${rowAreaBottom + 8}" stroke="#e2e8f0" stroke-width="1" />`,

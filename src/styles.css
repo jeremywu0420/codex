@@ -440,6 +440,29 @@ h2 {
   font-weight: 500;
 }
 
+.panel-header-actions {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.panel-header-actions button {
+  min-width: 40px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-soft);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.panel-header-actions button:hover {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
 .state-variable-line {
   margin: -6px 0 14px;
   color: var(--text-soft);
@@ -586,19 +609,78 @@ th {
   margin-bottom: 8px;
 }
 
-.kmap {
-  display: grid;
-  gap: 0;
-  border: 1px solid var(--border-strong);
+.kmap-table {
+  border-collapse: collapse;
+  width: auto;
+}
+
+.kmap-table th {
+  min-width: 44px;
+  padding: 5px 8px;
+  background: var(--surface-3);
+  color: var(--text-muted);
+  font-family: "Times New Roman", Georgia, serif;
+  font-size: 13px;
+  font-style: italic;
+  font-weight: 700;
+}
+
+.kmap-corner {
+  position: relative;
+  min-width: 52px;
+  background: linear-gradient(to top right, transparent calc(50% - 0.5px), var(--border-strong), transparent calc(50% + 0.5px)), var(--surface-3) !important;
+}
+
+.kmap-corner-row {
+  position: absolute;
+  left: 6px;
+  bottom: 3px;
+  font-size: 11px;
+}
+
+.kmap-corner-col {
+  position: absolute;
+  right: 6px;
+  top: 3px;
+  font-size: 11px;
 }
 
 .kmap-cell {
-  display: grid;
+  min-width: 44px;
   min-height: 44px;
-  place-items: center;
-  border-right: 1px solid var(--border-strong);
-  border-bottom: 1px solid var(--border-strong);
+  padding: 4px 6px;
   background: var(--surface-2);
+  text-align: center;
+}
+
+.kmap-cell small {
+  display: block;
+}
+
+.kmap-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kmap-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.kmap-legend .formula {
+  font-size: 13px;
+}
+
+.kmap-legend-swatch {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  opacity: 0.75;
 }
 
 .kmap-cell small {
@@ -802,6 +884,18 @@ th {
   stroke: #2563eb;
   stroke-linecap: round;
   stroke-width: 2.5px;
+}
+
+.state-initial-marker {
+  fill: #2563eb;
+}
+
+.state-initial-label {
+  fill: #2563eb;
+  font-family: "Times New Roman", Georgia, serif;
+  font-size: 13px;
+  font-style: italic;
+  font-weight: 700;
 }
 
 .state-edge-marker {
@@ -1162,6 +1256,24 @@ th {
 
 .code-block code {
   font-family: inherit;
+}
+
+.tok-keyword {
+  color: #7dd3fc;
+  font-weight: 600;
+}
+
+.tok-number {
+  color: #fbbf24;
+}
+
+.tok-comment {
+  color: #8da2bd;
+  font-style: italic;
+}
+
+.tok-system {
+  color: #c4b5fd;
 }
 
 .code-generator-pdf-content {

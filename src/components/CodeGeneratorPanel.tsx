@@ -1,7 +1,46 @@
 import { useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { Clipboard, Download } from "lucide-react";
 import { buildCodeGeneratorArtifacts, type CodeTabId } from "../logic/codeGenerator";
 import { useCircuitStore } from "../store/useCircuitStore";
+
+const VERILOG_KEYWORDS = new Set([
+  "always", "assign", "begin", "case", "casex", "casez", "default", "else", "end", "endcase",
+  "endfunction", "endmodule", "endtask", "for", "forever", "function", "if", "initial", "inout",
+  "input", "integer", "localparam", "module", "negedge", "or", "output", "parameter", "posedge",
+  "reg", "repeat", "task", "wait", "while", "wire",
+]);
+
+// Lightweight client-side Verilog tokenizer: comments, sized literals, system tasks, keywords.
+const VERILOG_TOKEN_REGEX = /(\/\/[^\n]*)|(\d+'[bdhoBDHO][0-9a-fA-FxzXZ_?]+|\b\d+\b)|(\$[A-Za-z_]\w*)|(`[A-Za-z_]\w*)|([A-Za-z_]\w*)/g;
+
+function highlightVerilog(code: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  let lastIndex = 0;
+  let key = 0;
+  for (const match of code.matchAll(VERILOG_TOKEN_REGEX)) {
+    const index = match.index ?? 0;
+    if (index > lastIndex) nodes.push(code.slice(lastIndex, index));
+    const [text, comment, number, system, directive, word] = match;
+    if (comment) nodes.push(<span className="tok-comment" key={key++}>{text}</span>);
+    else if (number) nodes.push(<span className="tok-number" key={key++}>{text}</span>);
+    else if (system || directive) nodes.push(<span className="tok-system" key={key++}>{text}</span>);
+    else if (word && VERILOG_KEYWORDS.has(word)) nodes.push(<span className="tok-keyword" key={key++}>{text}</span>);
+    else nodes.push(text);
+    lastIndex = index + text.length;
+  }
+  if (lastIndex < code.length) nodes.push(code.slice(lastIndex));
+  return nodes;
+}
+
+function VerilogCode({ code }: { code: string }) {
+  const highlighted = useMemo(() => highlightVerilog(code), [code]);
+  return (
+    <pre className="code-block">
+      <code>{highlighted}</code>
+    </pre>
+  );
+}
 
 const tabs: { id: CodeTabId; label: string }[] = [
   { id: "behavioral", label: "Behavioral Verilog" },
@@ -105,7 +144,7 @@ export function CodeGeneratorPanel() {
               ))}
             </div>
 
-            <pre className="code-block"><code>{activeCode}</code></pre>
+            <VerilogCode code={activeCode} />
           </div>
 
           <div className="code-actions">
@@ -125,11 +164,11 @@ export function CodeGeneratorPanel() {
 
           <div className="code-generator-pdf-content">
             <h3>Behavioral Verilog</h3>
-            <pre className="code-block"><code>{artifacts.behavioralVerilog}</code></pre>
+            <VerilogCode code={artifacts.behavioralVerilog} />
             <h3>Gate-Level Verilog</h3>
-            <pre className="code-block"><code>{artifacts.gateLevelVerilog}</code></pre>
+            <VerilogCode code={artifacts.gateLevelVerilog} />
             <h3>Testbench</h3>
-            <pre className="code-block"><code>{artifacts.testbench}</code></pre>
+            <VerilogCode code={artifacts.testbench} />
             <h3>Verification Result</h3>
             <p className="code-pdf-status">Status: {verificationLabel(artifacts.verificationStatus)}</p>
             <ul className="code-pdf-verification">
