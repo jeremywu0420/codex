@@ -1,5 +1,8 @@
-import html2canvas from "html2canvas";
-import jsPDF from "jspdf";
+// jspdf and html2canvas are heavy; load them on demand so they stay out of the main bundle.
+async function loadExportLibraries() {
+  const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([import("html2canvas"), import("jspdf")]);
+  return { html2canvas, jsPDF };
+}
 
 export interface ExportReportOptions {
   fileName?: string;
@@ -52,6 +55,7 @@ function normalizeExportOptions(options: ExportReportOptions | string): Required
 }
 
 export async function exportReport(element: HTMLElement, options: ExportReportOptions | string = {}) {
+  const { html2canvas, jsPDF } = await loadExportLibraries();
   const exportOptions = normalizeExportOptions(options);
   const exportElement = createExportClone(element);
   try {

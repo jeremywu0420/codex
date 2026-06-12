@@ -1,6 +1,5 @@
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { CircuitBoard, Eraser, FlaskConical, Moon, Redo2, RotateCcw, Sun, Undo2 } from "lucide-react";
-import { CircuitDiagram } from "./components/CircuitDiagram";
 import { CodeGeneratorPanel } from "./components/CodeGeneratorPanel";
 import { EquationDisplay } from "./components/EquationDisplay";
 import { ExcitationTablePanel } from "./components/ExcitationTablePanel";
@@ -13,6 +12,11 @@ import { TimingDiagramPanel } from "./components/TimingDiagramPanel";
 import { ValidationPanel } from "./components/ValidationPanel";
 import { examplePresets } from "./examples";
 import { useCircuitStore } from "./store/useCircuitStore";
+
+// The circuit diagram pulls in konva/react-konva (~300 kB); split it into its own chunk.
+const CircuitDiagram = lazy(() =>
+  import("./components/CircuitDiagram").then((module) => ({ default: module.CircuitDiagram })),
+);
 
 const THEME_STORAGE_KEY = "scs-theme";
 
@@ -162,7 +166,9 @@ export default function App() {
             <EquationDisplay />
           </div>
           <div className={`tab-panel ${activeTab === "circuit" ? "active" : ""}`} role="tabpanel">
-            <CircuitDiagram />
+            <Suspense fallback={<section className="panel"><div className="diagram-placeholder">Loading circuit renderer…</div></section>}>
+              <CircuitDiagram />
+            </Suspense>
           </div>
           <div className={`tab-panel ${activeTab === "timing" ? "active" : ""}`} role="tabpanel">
             <TimingDiagramPanel />
