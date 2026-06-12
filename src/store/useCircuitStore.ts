@@ -6,12 +6,22 @@ import { buildKMap } from "../logic/kmap";
 import type { TimingStep } from "../logic/timing";
 import { verifyAllResults } from "../lib/verification";
 import type { VerificationResult } from "../lib/verification";
+import { lintDesign } from "../lib/designLint";
+import type { DesignLintResult } from "../lib/designLint";
+import { exampleToStateTable, findExample } from "../examples";
 
-interface CircuitState {
+const WORKSPACE_STORAGE_KEY = "scs-workspace-v1";
+const HISTORY_LIMIT = 50;
+
+interface WorkspaceSnapshot {
   modelType: ModelType;
   flipFlopType: FlipFlopType;
   variables: Variables;
   stateTable: StateTableRow[];
+  initialStateBits: string;
+}
+
+interface CircuitState extends WorkspaceSnapshot {
   nextStateEquations: Equation[];
   excitationEquations: Equation[];
   outputEquations: Equation[];
@@ -21,11 +31,20 @@ interface CircuitState {
   generatedCircuitGraph: CircuitGraph | null;
   timingTrace: TimingStep[] | null;
   verification: VerificationResult;
+  lint: DesignLintResult;
+  history: WorkspaceSnapshot[];
+  future: WorkspaceSnapshot[];
   setModelType: (modelType: ModelType) => void;
   setFlipFlopType: (flipFlopType: FlipFlopType) => void;
   setVariables: (patch: Partial<Pick<Variables, "inputs" | "outputs">>) => void;
+  setInitialState: (initialStateBits: string) => void;
   updateRow: (rowId: string, patch: Partial<StateTableRow>) => void;
   updateMooreOutput: (rowId: string, outputName: string, value: LogicValue) => void;
+  loadExample: (exampleId: string) => void;
+  clearTable: () => void;
+  resetAll: () => void;
+  undo: () => void;
+  redo: () => void;
   setGeneratedCircuitGraph: (generatedCircuitGraph: CircuitGraph | null) => void;
   setTimingTrace: (timingTrace: TimingStep[] | null) => void;
   recompute: () => void;
@@ -195,6 +214,7 @@ function compute(
   flipFlopType: FlipFlopType,
   variables: Variables,
   stateTable: StateTableRow[],
+  initialStateBits: string,
   timingTrace: TimingStep[] | null = null,
   generatedCircuitGraph: CircuitGraph | null = null,
 ) {
@@ -213,6 +233,7 @@ function compute(
     timingTrace,
     generatedCircuitGraph,
   );
+  const lint = lintDesign({ stateTable, variables, modelType, initialStateBits });
   return {
     nextStateEquations: pipeline.nextStateEquations,
     excitationEquations: pipeline.excitationEquations,
@@ -223,91 +244,230 @@ function compute(
     generatedCircuitGraph,
     timingTrace,
     verification,
+    lint,
   };
 }
 
-const initialStateTable = buildStateTable(initialVariables, initialRows, initialVariables);
-const initialComputed = compute("mealy", "jk", initialVariables, initialStateTable);
+function defaultInitialStateBits(variables: Variables) {
+  return "0".repeat(variables.states.length);
+}
 
-export const useCircuitStore = create<CircuitState>((set, get) => ({
+function snapshotOf(state: WorkspaceSnapshot): WorkspaceSnapshot {
+  return {
+    modelType: state.modelType,
+    flipFlopType: state.flipFlopType,
+    variables: state.variables,
+    stateTable: state.stateTable,
+    initialStateBits: state.initialStateBits,
+  };
+}
+
+function saveWorkspace(snapshot: WorkspaceSnapshot) {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return;
+    window.localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(snapshot));
+  } catch {
+    // Quota/security errors must never break the app.
+  }
+}
+
+function loadWorkspace(): WorkspaceSnapshot | null {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return null;
+    const raw = window.localStorage.getItem(WORKSPACE_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<WorkspaceSnapshot>;
+    if (!parsed || typeof parsed !== "object") return null;
+    if (parsed.modelType !== "mealy" && parsed.modelType !== "moore") return null;
+    if (!parsed.flipFlopType || !["jk", "t", "sr", "d"].includes(parsed.flipFlopType)) return null;
+    if (!parsed.variables || !Array.isArray(parsed.variables.inputs) || !Array.isArray(parsed.variables.outputs)) return null;
+    if (!Array.isArray(parsed.stateTable)) return null;
+    const variables: Variables = {
+      inputs: parsed.variables.inputs.filter((name): name is string => typeof name === "string" && /^[A-Za-z][A-Za-z0-9]*$/.test(name)),
+      states: initialVariables.states,
+      outputs: parsed.variables.outputs.filter((name): name is string => typeof name === "string" && /^[A-Za-z][A-Za-z0-9]*$/.test(name)),
+      clock: initialVariables.clock,
+    };
+    if (!variables.inputs.length || !variables.outputs.length) return null;
+    const stateTable = buildStateTable(variables, parsed.stateTable as StateTableRow[], variables);
+    const initialStateBits =
+      typeof parsed.initialStateBits === "string" && /^[01]+$/.test(parsed.initialStateBits) && parsed.initialStateBits.length === variables.states.length
+        ? parsed.initialStateBits
+        : defaultInitialStateBits(variables);
+    return { modelType: parsed.modelType, flipFlopType: parsed.flipFlopType, variables, stateTable, initialStateBits };
+  } catch {
+    return null;
+  }
+}
+
+function clearWorkspaceStorage() {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return;
+    window.localStorage.removeItem(WORKSPACE_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+const factorySnapshot: WorkspaceSnapshot = {
   modelType: "mealy",
   flipFlopType: "jk",
   variables: initialVariables,
-  stateTable: initialStateTable,
-  ...initialComputed,
-  setModelType: (modelType) => {
-    const stateTable = modelType === "moore" ? normalizeMooreOutputs(get().stateTable, get().variables) : get().stateTable;
-    const next = compute(modelType, get().flipFlopType, get().variables, stateTable);
-    set({ modelType, stateTable, ...next });
-  },
-  setFlipFlopType: (flipFlopType) => {
-    const next = compute(get().modelType, flipFlopType, get().variables, get().stateTable);
-    set({ flipFlopType, ...next });
-  },
-  setVariables: (patch) => {
-    const previousVariables = get().variables;
-    const variables = { ...previousVariables, ...patch };
-    const rebuiltStateTable = buildStateTable(variables, get().stateTable, previousVariables);
-    const stateTable = get().modelType === "moore" ? normalizeMooreOutputs(rebuiltStateTable, variables) : rebuiltStateTable;
-    const next = compute(get().modelType, get().flipFlopType, variables, stateTable);
-    set({ variables, stateTable, ...next });
-  },
-  updateRow: (rowId, patch) => {
-    const stateTable = get().stateTable.map((row) => (row.id === rowId ? { ...row, ...patch } : row));
-    const next = compute(get().modelType, get().flipFlopType, get().variables, stateTable);
-    set({ stateTable, ...next });
-  },
-  updateMooreOutput: (rowId, outputName, value) => {
-    const sourceRow = get().stateTable.find((row) => row.id === rowId);
-    if (!sourceRow) return;
+  stateTable: buildStateTable(initialVariables, initialRows, initialVariables),
+  initialStateBits: defaultInitialStateBits(initialVariables),
+};
 
-    const stateKey = get().variables.states.map((state) => sourceRow.currentState[state]).join("");
-    const stateTable = get().stateTable.map((row) => {
-      const rowStateKey = get().variables.states.map((state) => row.currentState[state]).join("");
-      if (rowStateKey !== stateKey) return row;
-      return {
-        ...row,
-        output: {
-          ...row.output,
-          [outputName]: value,
-        },
+const startupSnapshot = loadWorkspace() ?? factorySnapshot;
+const initialComputed = compute(
+  startupSnapshot.modelType,
+  startupSnapshot.flipFlopType,
+  startupSnapshot.variables,
+  startupSnapshot.stateTable,
+  startupSnapshot.initialStateBits,
+);
+
+export const useCircuitStore = create<CircuitState>((set, get) => {
+  function pushHistory() {
+    const history = [...get().history, snapshotOf(get())].slice(-HISTORY_LIMIT);
+    return { history, future: [] as WorkspaceSnapshot[] };
+  }
+
+  function applySnapshot(snapshot: WorkspaceSnapshot, historyPatch: Pick<CircuitState, "history" | "future">) {
+    const next = compute(snapshot.modelType, snapshot.flipFlopType, snapshot.variables, snapshot.stateTable, snapshot.initialStateBits);
+    set({ ...snapshot, ...next, ...historyPatch });
+    saveWorkspace(snapshot);
+  }
+
+  function commit(snapshot: WorkspaceSnapshot) {
+    applySnapshot(snapshot, pushHistory() as Pick<CircuitState, "history" | "future">);
+  }
+
+  return {
+    ...startupSnapshot,
+    ...initialComputed,
+    history: [],
+    future: [],
+    setModelType: (modelType) => {
+      const stateTable = modelType === "moore" ? normalizeMooreOutputs(get().stateTable, get().variables) : get().stateTable;
+      commit({ ...snapshotOf(get()), modelType, stateTable });
+    },
+    setFlipFlopType: (flipFlopType) => {
+      commit({ ...snapshotOf(get()), flipFlopType });
+    },
+    setVariables: (patch) => {
+      const previousVariables = get().variables;
+      const variables = { ...previousVariables, ...patch };
+      const rebuiltStateTable = buildStateTable(variables, get().stateTable, previousVariables);
+      const stateTable = get().modelType === "moore" ? normalizeMooreOutputs(rebuiltStateTable, variables) : rebuiltStateTable;
+      commit({ ...snapshotOf(get()), variables, stateTable });
+    },
+    setInitialState: (initialStateBits) => {
+      commit({ ...snapshotOf(get()), initialStateBits });
+    },
+    updateRow: (rowId, patch) => {
+      const stateTable = get().stateTable.map((row) => (row.id === rowId ? { ...row, ...patch } : row));
+      commit({ ...snapshotOf(get()), stateTable });
+    },
+    updateMooreOutput: (rowId, outputName, value) => {
+      const sourceRow = get().stateTable.find((row) => row.id === rowId);
+      if (!sourceRow) return;
+
+      const sourceStateKey = get().variables.states.map((state) => sourceRow.currentState[state]).join("");
+      const stateTable = get().stateTable.map((row) => {
+        const rowStateKey = get().variables.states.map((state) => row.currentState[state]).join("");
+        if (rowStateKey !== sourceStateKey) return row;
+        return {
+          ...row,
+          output: {
+            ...row.output,
+            [outputName]: value,
+          },
+        };
+      });
+      commit({ ...snapshotOf(get()), stateTable });
+    },
+    loadExample: (exampleId) => {
+      const example = findExample(exampleId);
+      if (!example) return;
+      const variables: Variables = {
+        inputs: example.inputs,
+        states: initialVariables.states,
+        outputs: example.outputs,
+        clock: initialVariables.clock,
       };
-    });
-    const next = compute(get().modelType, get().flipFlopType, get().variables, stateTable);
-    set({ stateTable, ...next });
-  },
-  setGeneratedCircuitGraph: (generatedCircuitGraph) => {
-    const state = get();
-    const verification = buildVerification(
-      state.modelType,
-      state.flipFlopType,
-      state.variables,
-      state.stateTable,
-      state.nextStateEquations,
-      state.excitationEquations,
-      state.outputEquations,
-      state.timingTrace,
-      generatedCircuitGraph,
-    );
-    set({ generatedCircuitGraph, verification });
-  },
-  setTimingTrace: (timingTrace) => {
-    const state = get();
-    const verification = buildVerification(
-      state.modelType,
-      state.flipFlopType,
-      state.variables,
-      state.stateTable,
-      state.nextStateEquations,
-      state.excitationEquations,
-      state.outputEquations,
-      timingTrace,
-      state.generatedCircuitGraph,
-    );
-    set({ timingTrace, verification });
-  },
-  recompute: () => {
-    const next = compute(get().modelType, get().flipFlopType, get().variables, get().stateTable);
-    set(next);
-  },
-}));
+      commit({
+        modelType: example.modelType,
+        flipFlopType: example.flipFlopType,
+        variables,
+        stateTable: exampleToStateTable(example),
+        initialStateBits: example.initialStateBits,
+      });
+    },
+    clearTable: () => {
+      const variables = get().variables;
+      const stateTable = get().stateTable.map((row) => ({
+        ...row,
+        nextState: Object.fromEntries(variables.states.map((name) => [name, "-" as LogicValue])) as Record<string, LogicValue>,
+        output: Object.fromEntries(variables.outputs.map((name) => [name, "-" as LogicValue])) as Record<string, LogicValue>,
+      }));
+      commit({ ...snapshotOf(get()), stateTable });
+    },
+    resetAll: () => {
+      clearWorkspaceStorage();
+      commit(factorySnapshot);
+    },
+    undo: () => {
+      const { history, future } = get();
+      if (!history.length) return;
+      const previous = history[history.length - 1];
+      applySnapshot(previous, {
+        history: history.slice(0, -1),
+        future: [snapshotOf(get()), ...future].slice(0, HISTORY_LIMIT),
+      });
+    },
+    redo: () => {
+      const { history, future } = get();
+      if (!future.length) return;
+      const [next, ...rest] = future;
+      applySnapshot(next, {
+        history: [...history, snapshotOf(get())].slice(-HISTORY_LIMIT),
+        future: rest,
+      });
+    },
+    setGeneratedCircuitGraph: (generatedCircuitGraph) => {
+      const state = get();
+      const verification = buildVerification(
+        state.modelType,
+        state.flipFlopType,
+        state.variables,
+        state.stateTable,
+        state.nextStateEquations,
+        state.excitationEquations,
+        state.outputEquations,
+        state.timingTrace,
+        generatedCircuitGraph,
+      );
+      set({ generatedCircuitGraph, verification });
+    },
+    setTimingTrace: (timingTrace) => {
+      const state = get();
+      const verification = buildVerification(
+        state.modelType,
+        state.flipFlopType,
+        state.variables,
+        state.stateTable,
+        state.nextStateEquations,
+        state.excitationEquations,
+        state.outputEquations,
+        timingTrace,
+        state.generatedCircuitGraph,
+      );
+      set({ timingTrace, verification });
+    },
+    recompute: () => {
+      const state = get();
+      const next = compute(state.modelType, state.flipFlopType, state.variables, state.stateTable, state.initialStateBits);
+      set(next);
+    },
+  };
+});

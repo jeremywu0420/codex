@@ -27,56 +27,99 @@ function parseVariableList(value: string, excluded: string[] = []) {
 }
 
 export function StateTableEditor() {
-  const { modelType, variables, stateTable, setVariables, updateRow, updateMooreOutput } = useCircuitStore();
+  const { modelType, variables, stateTable, initialStateBits, setInitialState, setVariables, updateRow, updateMooreOutput } =
+    useCircuitStore();
   const isMoore = modelType === "moore";
   const [inputDraft, setInputDraft] = useState(variables.inputs.join(", "));
   const [outputDraft, setOutputDraft] = useState(variables.outputs.join(", "));
+  const [variableError, setVariableError] = useState("");
 
   useEffect(() => {
     setInputDraft(variables.inputs.join(", "));
     setOutputDraft(variables.outputs.join(", "));
   }, [variables.inputs, variables.outputs]);
 
+  const stateCodes = Array.from({ length: 2 ** variables.states.length }, (_, index) =>
+    index.toString(2).padStart(variables.states.length, "0"),
+  );
+
   function commitInputs() {
     const inputs = parseVariableList(inputDraft, [...variables.states, ...variables.outputs]);
-    if (inputs.length) setVariables({ inputs });
-    else setInputDraft(variables.inputs.join(", "));
+    if (inputs.length) {
+      setVariableError("");
+      setVariables({ inputs });
+    } else {
+      setVariableError(
+        "Invalid input variables: use letters/digits starting with a letter, and avoid names already used by states or outputs.",
+      );
+      setInputDraft(variables.inputs.join(", "));
+    }
   }
 
   function commitOutputs() {
     const outputs = parseVariableList(outputDraft, [...variables.states, ...variables.inputs]);
-    if (outputs.length) setVariables({ outputs });
-    else setOutputDraft(variables.outputs.join(", "));
+    if (outputs.length) {
+      setVariableError("");
+      setVariables({ outputs });
+    } else {
+      setVariableError(
+        "Invalid output variables: use letters/digits starting with a letter, and avoid names already used by states or inputs.",
+      );
+      setOutputDraft(variables.outputs.join(", "));
+    }
   }
 
   return (
     <section className="control-block">
       <p className="control-title">3. State Table Input</p>
-      <p className="model-note">
-        {isMoore
-          ? "Moore: output depends only on present state."
-          : "Mealy: output depends on present state and input."}
-      </p>
-      <label className="field-label">Input variables</label>
-      <input
-        className="text-field"
-        onBlur={commitInputs}
-        onChange={(event) => setInputDraft(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") event.currentTarget.blur();
-        }}
-        value={inputDraft}
-      />
-      <label className="field-label">Output variables</label>
-      <input
-        className="text-field"
-        onBlur={commitOutputs}
-        onChange={(event) => setOutputDraft(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") event.currentTarget.blur();
-        }}
-        value={outputDraft}
-      />
+      <p className="model-note">Click the Next State / Output cells to cycle 0 → 1 → − (don't care).</p>
+
+      <div className="field-row">
+        <div>
+          <label className="field-label" htmlFor="input-variables">Input variables</label>
+          <input
+            className="text-field"
+            id="input-variables"
+            onBlur={commitInputs}
+            onChange={(event) => setInputDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+            }}
+            value={inputDraft}
+          />
+        </div>
+        <div>
+          <label className="field-label" htmlFor="output-variables">Output variables</label>
+          <input
+            className="text-field"
+            id="output-variables"
+            onBlur={commitOutputs}
+            onChange={(event) => setOutputDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+            }}
+            value={outputDraft}
+          />
+        </div>
+        <div>
+          <label className="field-label" htmlFor="initial-state">Initial state ({variables.states.join("")})</label>
+          <select
+            className="text-field"
+            id="initial-state"
+            onChange={(event) => setInitialState(event.target.value)}
+            value={initialStateBits}
+          >
+            {stateCodes.map((code) => (
+              <option key={code} value={code}>
+                {code}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {variableError ? <div className="diagram-alert error field-alert">{variableError}</div> : null}
+
       <div className="table-wrap compact-table">
         <table>
           <thead>

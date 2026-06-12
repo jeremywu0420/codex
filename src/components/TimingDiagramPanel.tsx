@@ -13,7 +13,7 @@ function formatBits(names: string[], values: Record<string, string>) {
 }
 
 export function TimingDiagramPanel() {
-  const { flipFlopType, modelType, setTimingTrace, stateTable, variables } = useCircuitStore();
+  const { flipFlopType, initialStateBits, modelType, setTimingTrace, stateTable, variables } = useCircuitStore();
   const [timingSvg, setTimingSvg] = useState("");
   const [generatedSignature, setGeneratedSignature] = useState("");
   const [error, setError] = useState("");
@@ -31,6 +31,7 @@ export function TimingDiagramPanel() {
     () =>
       JSON.stringify({
         flipFlopType,
+        initialStateBits,
         inputSequenceText,
         modelType,
         stateTable,
@@ -40,7 +41,7 @@ export function TimingDiagramPanel() {
           states: variables.states,
         },
       }),
-    [flipFlopType, inputSequenceText, modelType, stateTable, variables.inputs, variables.outputs, variables.states],
+    [flipFlopType, initialStateBits, inputSequenceText, modelType, stateTable, variables.inputs, variables.outputs, variables.states],
   );
 
   const canUseTiming = Boolean(timingSvg);
@@ -54,6 +55,9 @@ export function TimingDiagramPanel() {
     setError("");
     try {
       const inputSequence = parseInputSequence(inputSequenceText, variables.inputs);
+      const initialState = Object.fromEntries(
+        variables.states.map((stateName, index) => [stateName, (initialStateBits[index] ?? "0") as "0" | "1"]),
+      ) as Record<string, "0" | "1">;
       const timingData = generateTimingData(
         stateTable,
         modelType,
@@ -62,6 +66,7 @@ export function TimingDiagramPanel() {
         variables.inputs,
         variables.outputs,
         inputSequence,
+        initialState,
       );
       console.table(timingStepsToConsoleRows(timingData.steps));
       setTimingSvg(renderTimingDiagramSVG(timingData));

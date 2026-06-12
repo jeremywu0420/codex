@@ -65,11 +65,13 @@ const NODE_LABEL_CLEARANCE = 8;
 const LABEL_TIME_CANDIDATES = [0.5, 0.44, 0.56, 0.38, 0.62, 0.35, 0.65];
 const LABEL_OFFSET_CANDIDATES = [14, 18, 10, 20];
 const SELF_LOOP_LABEL_OFFSET_CANDIDATES = [8, 12, 16, 20];
+// Symmetric square layout (Gray-code order around the square) keeps the
+// diagram stable across regenerations and leaves room for edge labels.
 const FIXED_TWO_BIT_POSITIONS: Record<string, Point> = {
-  "00": { x: 210, y: 70 },
-  "01": { x: 80, y: 250 },
-  "10": { x: 210, y: 180 },
-  "11": { x: 340, y: 250 },
+  "00": { x: 116, y: 88 },
+  "01": { x: 304, y: 88 },
+  "11": { x: 304, y: 232 },
+  "10": { x: 116, y: 232 },
 };
 
 function orderedKeys<T>(record: Record<string, T> | undefined) {
@@ -551,7 +553,28 @@ function renderNode(node: DiagramNode, machineType: ModelType) {
   );
 }
 
-export function renderStateDiagram(stateTable: StateTableRow[], machineType: ModelType): ReactNode {
+function renderInitialStateArrow(node: DiagramNode, center: Point) {
+  // Point the entry arrow inward from outside the diagram toward the node.
+  const angle = Math.atan2(node.y - center.y, node.x - center.x) || -Math.PI / 2;
+  const direction = { x: Math.cos(angle), y: Math.sin(angle) };
+  const tip = {
+    x: node.x + direction.x * (NODE_RADIUS + 6),
+    y: node.y + direction.y * (NODE_RADIUS + 6),
+  };
+  const tail = {
+    x: node.x + direction.x * (NODE_RADIUS + 34),
+    y: node.y + direction.y * (NODE_RADIUS + 34),
+  };
+  return (
+    <path
+      className="state-initial-arrow"
+      d={`M ${pathPoint(tail)} L ${pathPoint(tip)}`}
+      markerEnd="url(#state-diagram-arrow)"
+    />
+  );
+}
+
+export function renderStateDiagram(stateTable: StateTableRow[], machineType: ModelType, initialStateId?: string): ReactNode {
   const firstRow = stateTable[0];
   const stateNames = orderedKeys(firstRow?.currentState);
   const inputNames = orderedKeys(firstRow?.input);
@@ -586,7 +609,12 @@ export function renderStateDiagram(stateTable: StateTableRow[], machineType: Mod
           <path className="state-edge-marker" d="M 0 0 L 8 4 L 0 8 z" />
         </marker>
       </defs>
-      <g className="edges-layer state-edge-layer">{renderedEdges.map(renderEdge)}</g>
+      <g className="edges-layer state-edge-layer">
+        {renderedEdges.map(renderEdge)}
+        {initialStateId && nodeById.has(initialStateId)
+          ? renderInitialStateArrow(nodeById.get(initialStateId) as DiagramNode, layout.center)
+          : null}
+      </g>
       <g className="labels-layer state-label-layer">
         {renderedEdges.map((edge) => renderEdgeLabel(edge.label, edge.labelPosition, `${edge.key}-label`))}
       </g>
@@ -599,11 +627,15 @@ export function StateDiagramPanel() {
   const modelType = useCircuitStore((state) => state.modelType);
   const stateTable = useCircuitStore((state) => state.stateTable);
   const flipFlopType = useCircuitStore((state) => state.flipFlopType);
+  const initialStateBits = useCircuitStore((state) => state.initialStateBits);
 
   return (
     <section className="panel state-diagram-panel" data-flip-flop-type={flipFlopType}>
-      <h2>State Diagram ({modelType === "moore" ? "Moore" : "Mealy"})</h2>
-      <div className="state-diagram-scroll">{renderStateDiagram(stateTable, modelType)}</div>
+      <h2>
+        State Diagram ({modelType === "moore" ? "Moore" : "Mealy"})
+        <span className="panel-hint">{modelType === "moore" ? "node: state / output" : "edge label: input / output"}</span>
+      </h2>
+      <div className="state-diagram-scroll">{renderStateDiagram(stateTable, modelType, initialStateBits)}</div>
     </section>
   );
 }

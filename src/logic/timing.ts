@@ -300,6 +300,25 @@ function renderDigitalSignal(values: TimingValue[], x0: number, yHigh: number, y
   return fragments.join("");
 }
 
+function renderStateAnnotationRow(steps: TimingStep[], x0: number, rowTop: number, cycleWidth: number, labelWidth: number) {
+  if (!steps.length) return "";
+  const boxHeight = 24;
+  const boxY = rowTop + 8;
+  const textY = boxY + boxHeight / 2 + 4;
+  const fragments = [
+    `<text x="${labelWidth - 14}" y="${textY}" text-anchor="end" font-size="14" font-weight="700" fill="#334155">State</text>`,
+  ];
+  steps.forEach((step, index) => {
+    const x = x0 + index * cycleWidth;
+    const bits = Object.values(step.currentState).join("");
+    fragments.push(
+      `<rect x="${x + 3}" y="${boxY}" width="${cycleWidth - 6}" height="${boxHeight}" rx="4" fill="#f1f5f9" stroke="#cbd5e1" />`,
+      `<text x="${x + cycleWidth / 2}" y="${textY}" text-anchor="middle" font-size="13" font-weight="700" fill="#0f172a">${escapeXml(bits)}</text>`,
+    );
+  });
+  return fragments.join("");
+}
+
 export function renderTimingDiagramSVG(data: TimingData, options: TimingLayoutOptions = {}) {
   const cycleWidth = options.cycleWidth ?? 80;
   const labelWidth = options.labelWidth ?? 104;
@@ -308,9 +327,10 @@ export function renderTimingDiagramSVG(data: TimingData, options: TimingLayoutOp
   const topPadding = 24;
   const rightPadding = 32;
   const bottomPadding = 24;
+  const stateRowHeight = data.steps.length ? 40 : 0;
   const rowAreaBottom = topPadding + data.signals.length * rowHeight;
   const width = x0 + data.cycleCount * cycleWidth + rightPadding;
-  const height = rowAreaBottom + bottomPadding;
+  const height = rowAreaBottom + stateRowHeight + bottomPadding;
 
   const rows = data.signals
     .map((signal, index) => {
@@ -344,6 +364,7 @@ export function renderTimingDiagramSVG(data: TimingData, options: TimingLayoutOp
     risingEdges,
     rows,
     `<line x1="${x0}" y1="${rowAreaBottom + 8}" x2="${x0 + data.cycleCount * cycleWidth}" y2="${rowAreaBottom + 8}" stroke="#e2e8f0" stroke-width="1" />`,
+    renderStateAnnotationRow(data.steps, x0, rowAreaBottom, cycleWidth, labelWidth),
     `</svg>`,
   ].join("");
 }
