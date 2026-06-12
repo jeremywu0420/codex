@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { Clipboard, Download } from "lucide-react";
+import { Clipboard, Download, PlayCircle } from "lucide-react";
 import { buildCodeGeneratorArtifacts, type CodeTabId } from "../logic/codeGenerator";
+import { layoutCircuitGraph } from "../logic/circuitLayout";
+import { buildDefaultInputSequence, generateTimingData } from "../logic/timing";
 import { useCircuitStore } from "../store/useCircuitStore";
 
 const VERILOG_KEYWORDS = new Set([
@@ -74,9 +76,51 @@ function verificationLabel(status: ReturnType<typeof buildCodeGeneratorArtifacts
 }
 
 export function CodeGeneratorPanel() {
-  const { equations, flipFlopType, modelType, stateTable, timingTrace, variables, verification } = useCircuitStore();
+  const {
+    circuitGraph,
+    equations,
+    flipFlopType,
+    initialStateBits,
+    modelType,
+    setGeneratedCircuitGraph,
+    setTimingTrace,
+    stateTable,
+    timingTrace,
+    variables,
+    verification,
+  } = useCircuitStore();
   const [activeTab, setActiveTab] = useState<CodeTabId>("behavioral");
   const [copied, setCopied] = useState(false);
+  const [verifyError, setVerifyError] = useState("");
+
+  // Computes the circuit layout and a timing simulation headlessly so the
+  // skipped verification checks can run without visiting the other tabs.
+  function runVerification() {
+    setVerifyError("");
+    try {
+      const layoutedGraph = layoutCircuitGraph(circuitGraph);
+      if (layoutedGraph.metadata.validationErrors?.length) {
+        throw new Error(`Circuit validation failed:\n${layoutedGraph.metadata.validationErrors.join("\n")}`);
+      }
+      const initialState = Object.fromEntries(
+        variables.states.map((stateName, index) => [stateName, (initialStateBits[index] ?? "0") as "0" | "1"]),
+      ) as Record<string, "0" | "1">;
+      const timingData = generateTimingData(
+        stateTable,
+        modelType,
+        flipFlopType,
+        variables.states,
+        variables.inputs,
+        variables.outputs,
+        buildDefaultInputSequence(variables.inputs),
+        initialState,
+      );
+      setGeneratedCircuitGraph(layoutedGraph);
+      setTimingTrace(timingData.steps);
+    } catch (error) {
+      setVerifyError(error instanceof Error ? error.message : "Verification failed.");
+    }
+  }
   const artifacts = useMemo(
     () =>
       buildCodeGeneratorArtifacts({
@@ -123,8 +167,18 @@ export function CodeGeneratorPanel() {
         <div className="diagram-alert warning code-generator-alert">Warning: current design has verification errors. Generated code may be incorrect.</div>
       ) : null}
       {artifacts.isStateTableComplete && artifacts.verificationStatus === "pending" ? (
-        <div className="diagram-alert warning code-generator-alert">Please run verification before exporting code.</div>
+        <div className="diagram-alert warning code-generator-alert code-generator-alert-action">
+          <span>
+            Verification has not run yet: it compares the generated circuit and a timing simulation against your state
+            table before code can be downloaded.
+          </span>
+          <button onClick={runVerification} type="button">
+            <PlayCircle size={14} />
+            Run Verification
+          </button>
+        </div>
       ) : null}
+      {verifyError ? <div className="diagram-alert error code-generator-alert">{verifyError}</div> : null}
 
       {artifacts.isStateTableComplete ? (
         <>

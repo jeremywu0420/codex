@@ -491,9 +491,15 @@ function generateTestbench(variables: Variables, identifiers: VerilogIdentifiers
   return lines.join("\n");
 }
 
+// Only these checks depend on artifacts the user (or the Run Verification
+// button) must generate first. The state-transition/excitation pair is
+// intentionally either/or, so one of them is always skipped by design and
+// must not hold the export in "pending" forever.
+const artifactDependentChecks = new Set(["Timing trace check", "Circuit graph check"]);
+
 export function getCodeGeneratorVerificationStatus(verification: VerificationResult): CodeGeneratorVerificationStatus {
   if (!verification.passed) return "fail";
-  if (verification.checks.some((check) => check.skipped)) return "pending";
+  if (verification.checks.some((check) => check.skipped && artifactDependentChecks.has(check.name))) return "pending";
   return "pass";
 }
 

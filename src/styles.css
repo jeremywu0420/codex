@@ -1177,6 +1177,34 @@ th {
   margin: 12px 16px 0;
 }
 
+.code-generator-alert-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.code-generator-alert-action button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+.code-generator-alert-action button:hover {
+  filter: brightness(1.07);
+}
+
 .code-generator-interactive {
   display: flex;
   min-height: 0;
