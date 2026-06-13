@@ -648,6 +648,17 @@ export function routeOrthogonalEdge(edge: CircuitEdge, nodes: CircuitNode[], obs
     }
   }
 
+  // Last resort before giving up: sweep a dense set of vertical lanes across the
+  // whole source-to-target corridor. Two different nets must never be forced to
+  // share a segment, so prefer any obstacle-clear, overlap-free lane over the
+  // generic fallback (which only guarantees obstacle clearance).
+  const corridorStart = Math.min(from.x, to.x);
+  const corridorEnd = Math.max(from.x, to.x);
+  for (let bendX = corridorStart; bendX <= corridorEnd; bendX += 6) {
+    const candidate = routeOrthogonal(from, to, bendX);
+    if (selectRoute.isPreferred(candidate)) return candidate;
+  }
+
   return selectRoute.fallback() ?? pathWithChannel(from, to, fromNode, toNode, channels[0] ?? Math.min(from.y, to.y) - routingChannelY);
 }
 

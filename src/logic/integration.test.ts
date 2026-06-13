@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildCircuitGraph } from "./circuitGraph";
+import { layoutCircuitGraph } from "./circuitLayout";
 import { deriveEquations, deriveSequentialPipeline } from "./equations";
 import { buildKMap } from "./kmap";
 import { minimizeBoolean } from "./minimizer";
@@ -94,5 +95,31 @@ describe("logic integration", () => {
     expect(maps).toHaveLength(equations.length);
     expect(graph.metadata.flipFlopType).toBe(flipFlopType);
     expect(graph.edges.some((edge) => edge.to === "ff:A")).toBe(true);
+  });
+
+  it("lays out the two-state JK machine whose shared XOR product terms previously merged nets", () => {
+    // Regression: this exact Mealy/JK state table derives J_A = K_A = B'X + BX' and
+    // Z = A'X + B'X + ABX'. The shared product terms B'X and BX' fan out from single
+    // AND gates into different OR gates, which used to route onto the same vertical
+    // lane and fail validation ("Different nets NET_AND_B_NOT_X and NET_AND_NOT_B_X
+    // share wire segment ...").
+    const twoStateVariables: Variables = { inputs: ["X"], states: ["A", "B"], outputs: ["Z"], clock: "CLK" };
+    const twoStateRows: StateTableRow[] = [
+      { id: "000", currentState: { A: "0", B: "0" }, input: { X: "0" }, nextState: { A: "0", B: "1" }, output: { Z: "0" } },
+      { id: "001", currentState: { A: "0", B: "0" }, input: { X: "1" }, nextState: { A: "1", B: "1" }, output: { Z: "1" } },
+      { id: "010", currentState: { A: "0", B: "1" }, input: { X: "0" }, nextState: { A: "1", B: "0" }, output: { Z: "0" } },
+      { id: "011", currentState: { A: "0", B: "1" }, input: { X: "1" }, nextState: { A: "0", B: "0" }, output: { Z: "1" } },
+      { id: "100", currentState: { A: "1", B: "0" }, input: { X: "0" }, nextState: { A: "1", B: "1" }, output: { Z: "0" } },
+      { id: "101", currentState: { A: "1", B: "0" }, input: { X: "1" }, nextState: { A: "0", B: "1" }, output: { Z: "1" } },
+      { id: "110", currentState: { A: "1", B: "1" }, input: { X: "0" }, nextState: { A: "0", B: "0" }, output: { Z: "1" } },
+      { id: "111", currentState: { A: "1", B: "1" }, input: { X: "1" }, nextState: { A: "1", B: "0" }, output: { Z: "0" } },
+    ];
+
+    const pipeline = deriveSequentialPipeline(twoStateRows, twoStateVariables, "mealy", "jk");
+    const graph = layoutCircuitGraph(
+      buildCircuitGraph({ equations: pipeline.circuitEquations, flipFlopType: "jk", variables: twoStateVariables }),
+    );
+
+    expect(graph.metadata.validationErrors ?? []).toEqual([]);
   });
 });
