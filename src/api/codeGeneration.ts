@@ -89,6 +89,7 @@ async function runLocalDevCodeGeneration(input: CodeGenerationInput): Promise<Co
   return {
     artifacts: codeGenerator.buildCodeGeneratorArtifacts({
       equations: pipeline.circuitEquations,
+      initialStateBits: input.initialStateBits,
       flipFlopType: input.flipFlopType,
       modelType: input.modelType,
       stateTable: input.stateTable,

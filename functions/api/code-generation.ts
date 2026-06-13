@@ -117,6 +117,7 @@ function buildCodeGeneration(input: CodeGenerationRequest) {
 
   const artifacts = buildCodeGeneratorArtifacts({
     equations,
+    initialStateBits: input.initialStateBits,
     flipFlopType: input.flipFlopType,
     modelType: input.modelType,
     stateTable: input.stateTable,
