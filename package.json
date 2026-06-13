@@ -19,7 +19,7 @@
     "type": "git",
     "url": "https://github.com/jeremywu0420/codex.git"
   },
-  "homepage": "https://jeremywu0420.github.io/codex/",
+  "homepage": "https://github.com/jeremywu0420/codex#readme",
   "private": true,
   "type": "module",
   "scripts": {

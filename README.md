@@ -1,15 +1,15 @@
 # Sequential Circuit Studio
 
 [![CI](https://github.com/jeremywu0420/codex/actions/workflows/ci.yml/badge.svg)](https://github.com/jeremywu0420/codex/actions/workflows/ci.yml)
-[![Deploy](https://github.com/jeremywu0420/codex/actions/workflows/deploy.yml/badge.svg)](https://github.com/jeremywu0420/codex/actions/workflows/deploy.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-A fully client-side EDA workbench for **sequential circuit design**. Enter a state table and get the
-complete design flow — state diagram, excitation table, K-maps, minimized Boolean equations, a
-gate-level schematic, timing simulation and synthesizable Verilog — with cross-verification at every
-step. No server, no accounts, no paid APIs: everything runs in your browser.
+An EDA workbench for **sequential circuit design**. Enter a state table and get the complete design
+flow — state diagram, excitation table, K-maps, minimized Boolean equations, a gate-level schematic,
+timing simulation and synthesizable Verilog — with cross-verification at every step. A React frontend
+talks to serverless API routes that run the design-flow engine; no accounts and no paid APIs.
 
-**Live demo: <https://jeremywu0420.github.io/codex/>**
+**Deployment:** Cloudflare Pages + Functions. See [docs/cloudflare-deployment.md](docs/cloudflare-deployment.md)
+for the setup; the app is served from your project's `https://<project-name>.pages.dev/` domain.
 
 ![Workspace](docs/screenshots/workspace-light.png)
 
@@ -47,40 +47,42 @@ step. No server, no accounts, no paid APIs: everything runs in your browser.
 
 ```bash
 npm install
-npm run dev        # http://localhost:5174/codex/
+npm run dev        # frontend only — http://localhost:5174/ (API clients fall back to local compute)
 npm test           # vitest unit suite
-npm run build      # type-check + production build
+npm run build      # type-check frontend + backend, then production build
+npm run pages:dev  # full stack: serve dist/ + the /api/* Functions via wrangler
 ```
 
 ## Architecture
 
+The app is split into a React frontend and serverless API routes. The heavy design-flow engine runs
+on the backend; React components consume only API responses.
+
 ```
+functions/api/            # Cloudflare Pages Functions (the backend)
+├── workspace-compute.ts  #   equations · K-maps · circuit graph · verification · lint
+├── circuit-layout.ts     #   orthogonal routing, trunk sharing, SVG generation
+├── code-generation.ts    #   behavioral/gate-level Verilog + testbench
+├── testbench-simulation.ts
+└── timing-simulation.ts  #   interactive timing simulation data
+
 src/
-├── logic/                 # Pure design-flow engine (no React)
-│   ├── equations.ts       #   state table → next-state / excitation / output columns
-│   ├── minimizer.ts       #   Quine–McCluskey boolean minimization
-│   ├── kmap.ts            #   K-map models + per-term group coverage
-│   ├── flipFlop.ts        #   D/T/JK/SR excitation rules
-│   ├── circuitGraph.ts    #   equations → gate-level netlist
-│   ├── circuitLayout.ts   #   orthogonal routing, trunk sharing, junction detection, SVG export
-│   ├── timing.ts          #   cycle simulation + waveform SVG renderer
-│   └── codeGenerator.ts   #   behavioral/gate-level Verilog + testbench
-├── lib/
-│   ├── verification.ts    # cross-checks equations, circuit and timing against the state table
-│   ├── designLint.ts      # static input checks (reachability, traps, don't-cares, …)
-│   └── workspace.ts       # design-file format, share-link encoding
-├── store/useCircuitStore.ts  # zustand store: single source of truth, recomputes the whole flow on edit
-└── components/            # React UI (tabs, panels, editors)
+├── api/                  # typed fetch clients for the routes above (local fallback in dev)
+├── logic/                # design-flow engine: equations, minimizer, kmap, circuitLayout, codeGenerator…
+├── lib/                  # verification, designLint, workspace (design-file + share-link encoding)
+├── store/useCircuitStore.ts  # zustand store; optimistic UI, async backend recompute with race guarding
+└── components/           # React UI (tabs, panels, editors)
 ```
 
-Every edit recomputes the full pipeline synchronously, so all tabs are always consistent with the
-state table. Generated artifacts (circuit layout, timing trace) are invalidated on edit and verified
-against the table before Verilog export is unlocked.
+Every edit optimistically clears derived state, then calls the backend to recompute the full pipeline;
+stale responses are discarded via a request id. Generated artifacts (circuit layout, timing trace) are
+invalidated on edit and verified against the table before Verilog export is unlocked.
 
 ## Tech stack
 
-React 18 · TypeScript · Vite · Zustand · react-konva (schematic canvas) · Vitest — and zero runtime
-services.
+Frontend: React 18 · TypeScript · Vite · Zustand · react-konva (schematic canvas).
+Backend: Cloudflare Pages Functions (Web-standard `Request`/`Response`). Tests: Vitest. No paid or
+third-party runtime services.
 
 ## License
 

@@ -23,8 +23,10 @@ Framework preset: Vite
 Build command: npm run build
 Build output directory: dist
 Root directory: /
-Environment variable: VITE_BASE_PATH=/
 ```
+
+No environment variables are required: the Vite `base` now defaults to `/`, which matches the
+Cloudflare Pages root domain. Only set `VITE_BASE_PATH` if you deploy under a subpath.
 
 ## Local Full-Stack Development
 
@@ -76,12 +78,15 @@ The current app still contains UI rendering, design import/export, share-link se
 
 If you add more algorithm-heavy workflows later, keep the same pattern: put the implementation under `functions/api`, expose a small typed client under `src/api`, and let React components consume only API responses.
 
-## Why `VITE_BASE_PATH=/`
+## Base Path
 
-The existing project keeps `/codex/` as the default Vite base path for GitHub Pages compatibility. Cloudflare Pages usually serves the app from the root of the generated domain, so set:
+The Vite `base` defaults to `/` (see `vite.config.ts`), matching the Cloudflare Pages root domain, so
+no configuration is needed for the standard `https://<project-name>.pages.dev/` deployment.
 
-```text
-VITE_BASE_PATH=/
-```
+If you later deploy under a subpath, set `VITE_BASE_PATH` to that subpath (for example `/app/`).
 
-If you later deploy to a subpath, set this value to that subpath instead.
+## GitHub Pages
+
+GitHub Pages is no longer used: it cannot run the `functions/` backend, so every `/api/*` call would
+fail there. The repository's Pages deploy workflow has been removed. If GitHub Pages was previously
+enabled for this repo, disable it under **Settings → Pages** so it stops serving a stale build.
