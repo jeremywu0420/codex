@@ -52,6 +52,7 @@ export default function App() {
     initialStateBits,
     lint,
     verification,
+    validationStatus,
     history,
     future,
     loadExample,
@@ -107,8 +108,24 @@ export default function App() {
   // While a compute is still pending every check is "skipped" (see pendingVerification): treat
   // that as "not yet known" rather than a failure, so the badge never flashes a transient count.
   const verificationPending = !verification.passed && verification.checks.every((check) => check.skipped);
-  const validationCount =
+  const liveValidationCount =
     lint.errorCount + lint.warningCount + (verificationPending || verification.passed ? 0 : 1);
+
+  // Only let the badge change when the result is settled (valid/invalid). While the user is
+  // editing or a recompute is in flight, hold the last stable count so the badge never jumps.
+  const stableValidationCountRef = useRef(liveValidationCount);
+  const resultIsStable = validationStatus === "valid" || validationStatus === "invalid";
+  if (resultIsStable) stableValidationCountRef.current = liveValidationCount;
+  const validationCount = stableValidationCountRef.current;
+
+  const validationStatusMeta: Record<typeof validationStatus, { label: string; tone: string }> = {
+    idle: { label: "Ready", tone: "neutral" },
+    editing: { label: "Editing…", tone: "busy" },
+    validating: { label: "Checking…", tone: "busy" },
+    valid: { label: "Validated", tone: "ok" },
+    invalid: { label: "Issues found", tone: "warn" },
+  };
+  const statusMeta = validationStatusMeta[validationStatus];
 
   return (
     <main id="report-root" className="app-shell">
@@ -237,6 +254,16 @@ export default function App() {
                 {tab.id === "validation" && validationCount > 0 ? <span className="tab-badge">{validationCount}</span> : null}
               </button>
             ))}
+            <span
+              aria-live="polite"
+              className={`validation-status validation-status-${statusMeta.tone}`}
+              data-status={validationStatus}
+              role="status"
+              title="Validation status"
+            >
+              <span className="validation-status-dot" />
+              {statusMeta.label}
+            </span>
           </nav>
 
           {/* Every panel stays mounted so generated diagrams survive tab switches and PDF export can capture them. */}

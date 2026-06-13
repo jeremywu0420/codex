@@ -400,6 +400,64 @@ select {
   color: #131c2e;
 }
 
+/* Fixed-position validation status: lives on the right of the tab bar so it never
+   shifts layout, and only the dot/label colour changes between states. */
+.validation-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: auto;
+  min-width: 116px;
+  justify-content: flex-end;
+  padding: 0 12px;
+  height: 34px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.validation-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+  flex: none;
+}
+
+.validation-status-busy {
+  color: var(--text-muted);
+}
+
+.validation-status-busy .validation-status-dot {
+  animation: validation-pulse 1s ease-in-out infinite;
+}
+
+.validation-status-ok {
+  color: var(--ok-text);
+}
+
+.validation-status-warn {
+  color: var(--warn-text);
+}
+
+@keyframes validation-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .validation-status-busy .validation-status-dot {
+    animation: none;
+  }
+}
+
 .tab-panel {
   display: none;
 }
@@ -781,6 +839,69 @@ th {
   opacity: 0.55;
 }
 
+.diagram-tools button.is-active:not(:first-child) {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* Signal-probe row shown in Values mode. */
+.diagram-probe {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 20px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.diagram-probe .probe-label {
+  font-size: 10.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.probe-toggle,
+.probe-action {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-soft);
+  cursor: pointer;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.probe-toggle b {
+  font-weight: 800;
+}
+
+.probe-toggle.value-1 {
+  border-color: #86efac;
+  color: #15803d;
+}
+
+.probe-toggle.value-0 {
+  color: var(--text-muted);
+}
+
+.probe-action {
+  font-weight: 700;
+  color: var(--accent);
+  border-color: var(--accent-border);
+}
+
+.probe-action:hover {
+  background: var(--accent-soft);
+}
+
 .diagram-alert {
   margin: 12px 20px 0;
   border-radius: 6px;
@@ -801,9 +922,17 @@ th {
   color: var(--warn-text);
 }
 
+.diagram-hint {
+  margin: 10px 20px 0;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
 /* Diagram surfaces stay paper-white in both themes so exports look consistent. */
 .stage-wrap {
+  position: relative;
   width: 100%;
+  min-height: 360px;
   max-height: min(72vh, 760px);
   overflow: auto;
   margin-top: 14px;
@@ -812,6 +941,104 @@ th {
 
 .stage-wrap .konvajs-content {
   display: block;
+}
+
+/* Floating component info card shown when a part is clicked. */
+.component-card {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 248px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18);
+  padding: 12px 14px;
+  z-index: 5;
+}
+
+.component-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.component-card-title {
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.component-card-subtitle {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.component-card-close {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.component-card-close:hover {
+  color: var(--text);
+}
+
+.component-card-pins {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.component-card-section {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 5px;
+}
+
+.component-card-pins ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.component-card-pins li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.component-card-pins .pin-name {
+  font-weight: 700;
+  color: var(--accent);
+  font-family: "Times New Roman", serif;
+  font-style: italic;
+}
+
+.component-card-pins .pin-signal {
+  color: var(--text-soft);
+  text-align: right;
+  word-break: break-all;
+}
+
+.component-card-empty {
+  font-size: 11px;
+  color: var(--text-faint);
 }
 
 .timing-toolbar-card {

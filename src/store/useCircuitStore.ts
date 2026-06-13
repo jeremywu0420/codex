@@ -11,6 +11,20 @@ import { exampleToStateTable, findExample } from "../examples";
 
 const WORKSPACE_STORAGE_KEY = "scs-workspace-v1";
 const HISTORY_LIMIT = 50;
+// Wait for typing/selection to settle before recomputing validation, so the result
+// panels and the validation badge update once on a stable input instead of flickering
+// on every keystroke.
+const VALIDATION_DEBOUNCE_MS = 400;
+
+/**
+ * Lifecycle of the validation/derivation result, surfaced to the UI so it can show a
+ * steady status instead of flashing transient errors while the user is still editing.
+ * - idle: nothing computed yet
+ * - editing: the user just changed the input; the previous stable result is still shown
+ * - validating: inputs settled, recompute in flight
+ * - valid / invalid: a stable result is available
+ */
+export type ValidationStatus = "idle" | "editing" | "validating" | "valid" | "invalid";
 
 interface CircuitState extends WorkspaceSnapshot {
   nextStateEquations: Equation[];
@@ -24,6 +38,7 @@ interface CircuitState extends WorkspaceSnapshot {
   verification: VerificationResult;
   lint: DesignLintResult;
   computeError: string;
+  validationStatus: ValidationStatus;
   history: WorkspaceSnapshot[];
   future: WorkspaceSnapshot[];
   setModelType: (modelType: ModelType) => void;
@@ -313,8 +328,40 @@ const factorySnapshot: WorkspaceSnapshot = {
 const startupSnapshot = loadWorkspaceFromShareLink() ?? loadWorkspaceFromStorage() ?? factorySnapshot;
 const initialComputed = emptyComputed(startupSnapshot);
 
+function statusFromResult(result: WorkspaceComputeResult): ValidationStatus {
+  // A compute whose checks are all "skipped" is still pending more user input (a generated
+  // circuit / timing trace); treat that as "valid so far" rather than a failure, mirroring
+  // the badge logic in App. Only genuine lint errors or a failed (non-pending) verification
+  // mark the design invalid; warnings stay valid.
+  const verificationPending = !result.verification.passed && result.verification.checks.every((check) => check.skipped);
+  const hasError = result.lint.errorCount > 0 || (!verificationPending && !result.verification.passed);
+  return hasError ? "invalid" : "valid";
+}
+
 export const useCircuitStore = create<CircuitState>((set, get) => {
   let computeRequestId = 0;
+  let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+  let pendingSnapshot: WorkspaceSnapshot | null = null;
+
+  function cancelScheduledDerived() {
+    if (debounceTimer !== undefined) {
+      clearTimeout(debounceTimer);
+      debounceTimer = undefined;
+    }
+    pendingSnapshot = null;
+  }
+
+  // Debounce recompute after edits so validation updates once on a settled input.
+  function scheduleDerived(snapshot: WorkspaceSnapshot) {
+    pendingSnapshot = snapshot;
+    if (debounceTimer !== undefined) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      debounceTimer = undefined;
+      const next = pendingSnapshot;
+      pendingSnapshot = null;
+      if (next) void refreshDerived(next);
+    }, VALIDATION_DEBOUNCE_MS);
+  }
 
   async function refreshDerived(
     snapshot: WorkspaceSnapshot,
@@ -322,6 +369,9 @@ export const useCircuitStore = create<CircuitState>((set, get) => {
     timingTrace: TimingStep[] | null = null,
   ) {
     const requestId = ++computeRequestId;
+    // Hold onto the previous stable result; only flip the status so the UI can show
+    // "validating" without clearing what is already on screen.
+    set({ validationStatus: "validating" });
     try {
       const result = await computeWorkspaceApi({
         ...snapshot,
@@ -329,10 +379,10 @@ export const useCircuitStore = create<CircuitState>((set, get) => {
         timingTrace,
       });
       if (requestId !== computeRequestId) return;
-      set({ ...result, computeError: "" });
+      set({ ...result, computeError: "", validationStatus: statusFromResult(result) });
     } catch (error) {
       if (requestId !== computeRequestId) return;
-      set({ computeError: error instanceof Error ? error.message : "Workspace compute failed." });
+      set({ computeError: error instanceof Error ? error.message : "Workspace compute failed.", validationStatus: "invalid" });
     }
   }
 
@@ -347,9 +397,9 @@ export const useCircuitStore = create<CircuitState>((set, get) => {
     // flashes the validation badge. Only the user-generated artifacts are invalidated here,
     // because they no longer match the edited table and must be regenerated; the race guard
     // in refreshDerived discards any stale response.
-    set({ ...snapshot, generatedCircuitGraph: null, timingTrace: null, computeError: "", ...historyPatch });
+    set({ ...snapshot, generatedCircuitGraph: null, timingTrace: null, computeError: "", validationStatus: "editing", ...historyPatch });
     saveWorkspace(snapshot);
-    void refreshDerived(snapshot);
+    scheduleDerived(snapshot);
   }
 
   function commit(snapshot: WorkspaceSnapshot) {
@@ -360,6 +410,7 @@ export const useCircuitStore = create<CircuitState>((set, get) => {
     ...startupSnapshot,
     ...initialComputed,
     computeError: "",
+    validationStatus: "validating",
     history: [],
     future: [],
     setModelType: (modelType) => {
@@ -460,16 +511,21 @@ export const useCircuitStore = create<CircuitState>((set, get) => {
       const state = get();
       // Keep the prior verification visible until the recompute lands so the validation
       // badge does not flash while the new circuit graph is folded into the checks.
+      cancelScheduledDerived();
       set({ generatedCircuitGraph, computeError: "" });
       void refreshDerived(snapshotOf(state), generatedCircuitGraph, state.timingTrace);
     },
     setTimingTrace: (timingTrace) => {
       const state = get();
+      cancelScheduledDerived();
       set({ timingTrace, computeError: "" });
       void refreshDerived(snapshotOf(state), state.generatedCircuitGraph, timingTrace);
     },
     recompute: async () => {
       const state = get();
+      // Run immediately and drop any pending debounced recompute so callers that await
+      // recompute() (tests, programmatic refresh) get a deterministic, settled result.
+      cancelScheduledDerived();
       await refreshDerived(snapshotOf(state), state.generatedCircuitGraph, state.timingTrace);
     },
   };

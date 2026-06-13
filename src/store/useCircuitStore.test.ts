@@ -117,4 +117,16 @@ describe("useCircuitStore verification integration", () => {
     expect(useCircuitStore.getState().timingTrace).toBeNull();
     expect(checkByName("Timing trace check")).toMatchObject({ skipped: true, passed: false });
   });
+
+  it("marks the validation status editing on input and settles to a stable result", async () => {
+    const row = useCircuitStore.getState().stateTable[0];
+
+    useCircuitStore.getState().updateRow(row.id, { nextState: flipFirstStateBit(row) });
+    // The edit is debounced: status flips to editing immediately and the recompute is deferred.
+    expect(useCircuitStore.getState().validationStatus).toBe("editing");
+
+    // recompute() runs immediately and cancels the pending debounce, settling the status.
+    await useCircuitStore.getState().recompute();
+    expect(["valid", "invalid"]).toContain(useCircuitStore.getState().validationStatus);
+  });
 });
