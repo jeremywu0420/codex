@@ -26,19 +26,19 @@ function KMapGrid({ map }: { map: KMapModel }) {
       <thead>
         <tr>
           <th className="kmap-corner">
-            <span className="kmap-corner-row">{map.rowVariables.join("") || "·"}</span>
-            <span className="kmap-corner-col">{map.colVariables.join("") || "·"}</span>
+            <span className="kmap-corner-row">{map.rowVariables.join("") || "."}</span>
+            <span className="kmap-corner-col">{map.colVariables.join("") || "."}</span>
           </th>
           {colLabels.map((label) => (
-            <th key={`col-${label || "e"}`}>{label || "—"}</th>
+            <th key={`col-${label || "e"}`}>{label || "."}</th>
           ))}
         </tr>
       </thead>
       <tbody>
         {rowLabels.map((rowLabel, rowIndex) => (
           <tr key={`row-${rowLabel || "e"}`}>
-            <th>{rowLabel || "—"}</th>
-            {colLabels.map((colLabel, colIndex) => {
+            <th>{rowLabel || "."}</th>
+            {colLabels.map((_colLabel, colIndex) => {
               const cell = cellByPosition.get(`${rowIndex}:${colIndex}`);
               if (!cell) return <td key={`cell-${rowIndex}-${colIndex}`} />;
               const memberships = groupsByMinterm.get(cell.minterm) ?? [];
@@ -57,7 +57,7 @@ function KMapGrid({ map }: { map: KMapModel }) {
                   className={`kmap-cell value-${cell.value === "-" ? "dc" : cell.value}`}
                   key={`cell-${cell.minterm}`}
                   style={style}
-                  title={`m${cell.minterm}${memberships.length ? ` · ${memberships.map((index) => map.groups[index].term).join(", ")}` : ""}`}
+                  title={`m${cell.minterm}${memberships.length ? ` - ${memberships.map((index) => map.groups[index].term).join(", ")}` : ""}`}
                 >
                   <small>m{cell.minterm}</small>
                   <span>{cell.value}</span>
@@ -79,20 +79,29 @@ export function KMapViewer() {
     <section className="panel output-panel">
       <h2>
         K-Maps
-        <span className="panel-hint">gray-code headers · colored rings mark each product term</span>
+        <span className="panel-hint">gray-code headers - colored rings mark each product term</span>
       </h2>
-      <div className="kmap-scroll">
-        <div className="kmap-grid">
-          {kMaps.map((map) => {
-            const equation = equationById.get(map.equationId);
-            return (
-              <article className="kmap-card" key={map.equationId}>
-                <header>
+      <div className="kmap-grid">
+        {kMaps.map((map) => {
+          const equation = equationById.get(map.equationId);
+          return (
+            <article className="kmap-card" key={map.equationId}>
+              <header className="kmap-card-header">
+                <div className="kmap-card-title">
+                  <span className="kmap-section-label">Equation</span>
                   <strong>{equation ? <Formula text={equation.label} /> : null}</strong>
+                </div>
+                <div className="kmap-expression">
+                  <span className="kmap-section-label">Formula</span>
                   <Formula text={equation?.expression ?? ""} />
-                </header>
+                </div>
+              </header>
+              <div className="kmap-table-scroll">
                 <KMapGrid map={map} />
-                {map.groups.length ? (
+              </div>
+              {map.groups.length ? (
+                <div className="kmap-legend-block">
+                  <span className="kmap-section-label">Legend</span>
                   <ul className="kmap-legend">
                     {map.groups.map((group, index) => (
                       <li key={group.id}>
@@ -101,11 +110,11 @@ export function KMapViewer() {
                       </li>
                     ))}
                   </ul>
-                ) : null}
-              </article>
-            );
-          })}
-        </div>
+                </div>
+              ) : null}
+            </article>
+          );
+        })}
       </div>
     </section>
   );

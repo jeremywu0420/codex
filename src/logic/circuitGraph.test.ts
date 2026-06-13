@@ -187,6 +187,43 @@ function expectAllEdgesHaveNetIds(graph: ReturnType<typeof buildAndLayout>) {
   }
 }
 
+function expectAllContentInsideCanvas(graph: ReturnType<typeof buildAndLayout>, padding = 40) {
+  const right = graph.metadata.width - padding;
+  const bottom = graph.metadata.height - padding;
+  const assertPoint = (point: { x: number; y: number }, label: string) => {
+    expect(point.x, `${label} x`).toBeGreaterThanOrEqual(padding);
+    expect(point.y, `${label} y`).toBeGreaterThanOrEqual(padding);
+    expect(point.x, `${label} x`).toBeLessThanOrEqual(right);
+    expect(point.y, `${label} y`).toBeLessThanOrEqual(bottom);
+  };
+
+  for (const node of graph.nodes) {
+    const bounds = getNodeBounds(node);
+    assertPoint({ x: bounds.x, y: bounds.y }, `${node.id} top-left`);
+    assertPoint({ x: bounds.x + bounds.width, y: bounds.y + bounds.height }, `${node.id} bottom-right`);
+  }
+  for (const edge of graph.edges) {
+    toPointArray(edge.points ?? []).forEach((point, index) => assertPoint(point, `${edge.id ?? edge.wireId} point ${index}`));
+  }
+  toPointArray(graph.clockLine.points).forEach((point, index) => assertPoint(point, `clock point ${index}`));
+  graph.clockLine.branches.forEach((branch, branchIndex) =>
+    toPointArray(branch).forEach((point, pointIndex) => assertPoint(point, `clock branch ${branchIndex} point ${pointIndex}`)),
+  );
+}
+
+function bendCount(points: { x: number; y: number }[]) {
+  let bends = 0;
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+    const next = points[index + 1];
+    const previousHorizontal = previous.y === current.y;
+    const nextHorizontal = current.y === next.y;
+    if (previousHorizontal !== nextHorizontal) bends += 1;
+  }
+  return bends;
+}
+
 function longestHorizontalY(points: number[]) {
   let bestLength = -1;
   let bestY = Number.NaN;
@@ -361,7 +398,7 @@ function expectLayoutZonesAreOrdered(graph: ReturnType<typeof buildAndLayout>) {
 }
 
 function expectStateFeedbackUsesRightBusThenSignalBus(graph: ReturnType<typeof buildAndLayout>) {
-  for (const edge of graph.edges.filter((edge) => edge.from.startsWith("state:") || edge.from.startsWith("state-not:"))) {
+  for (const edge of graph.edges.filter((edge) => (edge.from.startsWith("state:") || edge.from.startsWith("state-not:")) && edge.to.startsWith("gate:"))) {
     const state = edge.from.startsWith("state-not:") ? edge.from.slice("state-not:".length) : edge.from.slice("state:".length);
     const sourceNet = edge.from.startsWith("state-not:") ? `${state}NOT`.toUpperCase() : state.toUpperCase();
     if (edge.netId !== sourceNet) continue;
@@ -668,6 +705,45 @@ describe("circuit graph generation", () => {
     expect(graph.metadata.validationErrors ?? []).toEqual([]);
     expect(kEdges).toHaveLength(2);
     expect(new Set(kEdges.map((edge) => edge.netId))).toEqual(new Set(["XNOT"]));
+  });
+
+  it("routes single literal and constant flip-flop inputs through local in-canvas taps", () => {
+    const graph = buildAndLayout("jk", ["A", "B"], {
+      J_A: "X",
+      K_A: "X'",
+      J_B: "A",
+      K_B: "1",
+      Z: "X",
+    });
+    const ja = graph.edges.find((edge) => edge.label === "J_A");
+    const ka = graph.edges.find((edge) => edge.label === "K_A");
+    const jb = graph.edges.find((edge) => edge.label === "J_B");
+    const kb = graph.edges.find((edge) => edge.label === "K_B");
+
+    expect(graph.metadata.validationErrors ?? []).toEqual([]);
+    expect(graph.nodes.some((node) => node.type === "AND" || node.type === "OR")).toBe(false);
+    expectAllContentInsideCanvas(graph);
+
+    expect(ja?.from).toBe("input:X");
+    expect(ja?.to).toBe("ff:A");
+    expect(ja?.toPin).toBe("J");
+    const jaPoints = toPointArray(ja?.points ?? []);
+    expect(jaPoints).toHaveLength(4);
+    expect(bendCount(jaPoints)).toBeLessThanOrEqual(2);
+    expect(pathLength(jaPoints)).toBeLessThan(graph.metadata.width);
+    expect(jaPoints[jaPoints.length - 2]?.y).toBe(ja?.targetAnchor?.y);
+
+    expect(ka?.from).toBe("not:X");
+    expect(toPointArray(ka?.points ?? [])).toHaveLength(4);
+    expect(bendCount(toPointArray(ka?.points ?? []))).toBeLessThanOrEqual(2);
+
+    expect(jb?.from).toBe("state:A");
+    expect(bendCount(toPointArray(jb?.points ?? []))).toBeLessThanOrEqual(3);
+
+    expect(kb?.from).toBe("const:K_B");
+    expect(kb?.metadata?.pinValue).toBe("1");
+    expect(toPointArray(kb?.points ?? [])).toHaveLength(2);
+    expect(pathLength(toPointArray(kb?.points ?? []))).toBeLessThanOrEqual(34);
   });
 
   it("reroutes shared product terms feeding different OR gates onto independent segments", () => {

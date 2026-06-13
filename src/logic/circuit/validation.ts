@@ -1,6 +1,7 @@
 // Structural validation of a laid-out circuit graph (floating pins, shared
 // segments across different nets, wires crossing component bodies, clock wiring).
 import type { CircuitEdge, CircuitGraph } from "../../types";
+import { canvasPadding } from "./constants";
 import { expandBounds, pathIntersectsObstacles, pointsFromFlat, pointsToSegments, segmentsOverlap } from "./geometry";
 import { getNodeBounds, getNodePins, isGate } from "./pins";
 import { nodeLabelNet } from "./nets";
@@ -85,6 +86,37 @@ export function validateCircuitGraph(graph: CircuitGraph) {
       return pins.pins.CLK.x === pinX && pins.pins.CLK.y === pinY;
     });
     if (hits.length !== 1) errors.push(`CLK branch ending at ${pinX},${pinY} does not connect to exactly one CLK pin.`);
+  }
+
+  const safeRight = graph.metadata.width - canvasPadding;
+  const safeBottom = graph.metadata.height - canvasPadding;
+  const pointIsInsideCanvas = (point: { x: number; y: number }) =>
+    point.x >= canvasPadding && point.y >= canvasPadding && point.x <= safeRight && point.y <= safeBottom;
+
+  for (const edge of graph.edges) {
+    for (const point of pointsFromFlat(edge.points)) {
+      if (!pointIsInsideCanvas(point)) {
+        errors.push(`Wire ${edge.wireId ?? edge.id ?? `${edge.from}->${edge.to}`} has point ${point.x},${point.y} outside canvas safe bounds.`);
+      }
+    }
+  }
+  for (const point of pointsFromFlat(graph.clockLine.points)) {
+    if (!pointIsInsideCanvas(point)) errors.push(`CLK bus point ${point.x},${point.y} is outside canvas safe bounds.`);
+  }
+  for (const branch of graph.clockLine.branches) {
+    for (const point of pointsFromFlat(branch)) {
+      if (!pointIsInsideCanvas(point)) errors.push(`CLK branch point ${point.x},${point.y} is outside canvas safe bounds.`);
+    }
+  }
+  for (const node of graph.nodes) {
+    const bounds = getNodeBounds(node);
+    const corners = [
+      { x: bounds.x, y: bounds.y },
+      { x: bounds.x + bounds.width, y: bounds.y + bounds.height },
+    ];
+    if (corners.some((point) => !pointIsInsideCanvas(point))) {
+      errors.push(`Component ${node.id} is outside canvas safe bounds.`);
+    }
   }
 
   if (graph.metadata.outputVariables.includes("Z") && !nodesById.has("output:Z")) errors.push("Mealy output Z is missing.");

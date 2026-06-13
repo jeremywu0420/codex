@@ -8,6 +8,7 @@ export const routingChannelY = 34;
 export const routingChannelX = 20;
 export const channelStep = 24;
 export const feedbackLaneStep = 24;
+export const canvasPadding = 40;
 
 /** Named X columns (and a few helper lanes) that define the left→right circuit zones. */
 export const zone = {

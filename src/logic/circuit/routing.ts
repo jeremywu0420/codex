@@ -1,7 +1,7 @@
 // Orthogonal wire routing: deterministic per-edge routes plus an obstacle/overlap
 // aware fallback router. Same-net wires may share a segment; different nets never do.
 import type { CircuitBounds, CircuitEdge, CircuitNode } from "../../types";
-import { channelStep, feedbackLaneStep, ffHeight, routingChannelX, routingChannelY, zone } from "./constants";
+import { channelStep, feedbackLaneStep, routingChannelX, routingChannelY, zone } from "./constants";
 import type { Point, Segment } from "./geometry";
 import {
   compactPoints,
@@ -12,7 +12,7 @@ import {
   pathOverlapsSegments,
   pointsToSegments,
 } from "./geometry";
-import { gateSize, inputAnchor, isGate, metadataNumber, outputAnchor } from "./pins";
+import { inputAnchor, isGate, metadataNumber, outputAnchor } from "./pins";
 import { makeWireId, nodeLabelNet } from "./nets";
 
 function routeOrthogonal(from: Point, to: Point, bendX?: number) {
@@ -136,6 +136,10 @@ function laneRoute(from: Point, to: Point, laneX: number) {
   return compactPoints([from, { x: laneX, y: from.y }, { x: laneX, y: to.y }, to]);
 }
 
+function busTapToPinRoute(from: Point, to: Point, busX: number) {
+  return compactPoints([from, { x: busX, y: from.y }, { x: busX, y: to.y }, to]);
+}
+
 function gateOutputExit(from: Point, distance = routingChannelX) {
   return { x: from.x + distance, y: from.y };
 }
@@ -220,18 +224,14 @@ function deterministicRouteEdge(edge: CircuitEdge, nodes: CircuitNode[]) {
   }
 
   if ((fromNode.type === "STATE" || fromNode.type === "STATE_NOT") && toNode.type === "FF") {
-    const { laneX } = ffInputLane(edge, from, to);
-    const leftSafeLaneX = zone.sumX + gateSize("OR").width + routingChannelX + 18;
-    const approachLaneX = Math.max(leftSafeLaneX, Math.min(laneX, zone.ffApproachX - laneIndex * 10));
-    const bottomLaneY = Math.max(from.y, to.y, toNode.y + (toNode.height ?? ffHeight)) + 90 + laneIndex * 14;
     const sourceIsStateNet = edgeNetId === stateSourceNet;
-    const exitX = sourceIsStateNet ? metadataNumber(fromNode, "feedbackExitX") ?? from.x + 44 : from.x + 86 + laneIndex * 10;
+    const laneY = metadataNumber(fromNode, "feedbackLaneY") ?? feedbackLaneY(fromNode);
+    const busX = sourceIsStateNet ? metadataNumber(fromNode, "busX") ?? zone.busStartX : finalNetLaneX;
     return compactPoints([
       from,
-      { x: exitX, y: from.y },
-      { x: exitX, y: bottomLaneY },
-      { x: approachLaneX, y: bottomLaneY },
-      { x: approachLaneX, y: to.y },
+      { x: from.x, y: laneY },
+      { x: busX, y: laneY },
+      { x: busX, y: to.y },
       to,
     ]);
   }
@@ -248,9 +248,8 @@ function deterministicRouteEdge(edge: CircuitEdge, nodes: CircuitNode[]) {
   }
 
   if (fromNode.type === "NOT" && toNode.type === "FF") {
-    const { laneX } = ffInputLane(edge, from, to);
-    const exit = gateOutputExit(from);
-    return compactPoints([from, exit, { x: laneX, y: from.y }, { x: laneX, y: to.y }, to]);
+    const busX = metadataNumber(fromNode, "busX") ?? Math.min(from.x + 70, to.x - 90);
+    return busTapToPinRoute(from, to, busX);
   }
 
   if (fromNode.type === "INPUT" && isGate(toNode)) {
@@ -283,13 +282,8 @@ function deterministicRouteEdge(edge: CircuitEdge, nodes: CircuitNode[]) {
   }
 
   if (fromNode.type === "INPUT" && toNode.type === "FF") {
-    const { laneX } = ffInputLane(edge, from, to);
-    const targetPin = edge.toPin ?? String(edge.metadata?.targetPin ?? "");
-    const useBottomLane = targetPin === "K" || targetPin === "R";
-    const aliasLaneY = useBottomLane
-      ? Math.max(from.y, to.y) + 76 + laneIndex * 12
-      : Math.min(from.y, to.y) - 72 - laneIndex * 12;
-    return compactPoints([from, { x: from.x, y: aliasLaneY }, { x: laneX, y: aliasLaneY }, { x: laneX, y: to.y }, to]);
+    const busX = metadataNumber(fromNode, "busX") ?? Math.min(from.x + 70, to.x - 90);
+    return busTapToPinRoute(from, to, busX);
   }
 
   if (isGate(fromNode) && toNode.type === "OUTPUT") {

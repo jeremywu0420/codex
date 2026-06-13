@@ -656,32 +656,70 @@ th {
 
 .kmap-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(156px, 1fr));
-  gap: 14px;
-}
-
-.kmap-scroll {
-  max-height: 560px;
-  overflow-y: auto;
-  padding-right: 6px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 20px;
+  align-items: start;
 }
 
 .kmap-card {
-  border: 0;
-  padding: 0;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 10px 22px rgba(30, 41, 59, 0.06);
+  overflow: hidden;
 }
 
-.kmap-card header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  margin-bottom: 8px;
+.kmap-card-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.kmap-card-title,
+.kmap-expression,
+.kmap-legend-block {
+  min-width: 0;
+}
+
+.kmap-card-title strong {
+  display: block;
+  margin-top: 3px;
+  color: var(--text);
+}
+
+.kmap-expression .formula {
+  display: block;
+  margin-top: 3px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.kmap-section-label {
+  display: block;
+  color: var(--text-faint);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.kmap-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 14px 16px 12px;
+  box-sizing: border-box;
 }
 
 .kmap-table {
   border-collapse: collapse;
-  width: auto;
+  width: max-content;
+  min-width: 320px;
 }
 
 .kmap-table th {
@@ -731,9 +769,15 @@ th {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 14px;
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   padding: 0;
   list-style: none;
+}
+
+.kmap-legend-block {
+  padding: 12px 16px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
 }
 
 .kmap-legend li {
@@ -2348,6 +2392,22 @@ th {
 
   .timing-current-values {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .kmap-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+
+  .kmap-card-header {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .kmap-table-scroll,
+  .kmap-legend-block {
+    padding-inline: 12px;
   }
 
   .result-tabs {

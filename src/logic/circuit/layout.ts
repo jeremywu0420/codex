@@ -1,7 +1,8 @@
 // Zone-based placement of the circuit graph: inputs/NOTs on the left, product (AND)
 // and sum (OR) gates in the middle, flip-flops and outputs on the right, then route.
-import type { CircuitEdge, CircuitGraph, CircuitNode } from "../../types";
+import type { CircuitBounds, CircuitEdge, CircuitGraph, CircuitNode, CircuitPoint } from "../../types";
 import {
+  canvasPadding,
   clockGap,
   feedbackLaneStep,
   feedbackTopY,
@@ -79,6 +80,108 @@ function positionConstantPinSources(edges: CircuitEdge[], nodes: CircuitNode[]) 
       pinValue: constantValue,
     };
   }
+}
+
+type LayoutExtents = {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+};
+
+function emptyExtents(): LayoutExtents {
+  return {
+    minX: Number.POSITIVE_INFINITY,
+    minY: Number.POSITIVE_INFINITY,
+    maxX: Number.NEGATIVE_INFINITY,
+    maxY: Number.NEGATIVE_INFINITY,
+  };
+}
+
+function includePoint(extents: LayoutExtents, point: CircuitPoint) {
+  extents.minX = Math.min(extents.minX, point.x);
+  extents.minY = Math.min(extents.minY, point.y);
+  extents.maxX = Math.max(extents.maxX, point.x);
+  extents.maxY = Math.max(extents.maxY, point.y);
+}
+
+function includeBounds(extents: LayoutExtents, bounds: CircuitBounds) {
+  includePoint(extents, { x: bounds.x, y: bounds.y });
+  includePoint(extents, { x: bounds.x + bounds.width, y: bounds.y + bounds.height });
+}
+
+function collectLayoutExtents(graph: CircuitGraph) {
+  const extents = emptyExtents();
+  for (const node of graph.nodes) includeBounds(extents, getNodeBounds(node));
+  for (const edge of graph.edges) {
+    pointsFromFlat(edge.points).forEach((point) => includePoint(extents, point));
+    if (edge.sourceAnchor) includePoint(extents, edge.sourceAnchor);
+    if (edge.targetAnchor) includePoint(extents, edge.targetAnchor);
+  }
+  pointsFromFlat(graph.clockLine.points).forEach((point) => includePoint(extents, point));
+  graph.clockLine.branches.forEach((branch) => pointsFromFlat(branch).forEach((point) => includePoint(extents, point)));
+  return extents;
+}
+
+function isFiniteExtents(extents: LayoutExtents) {
+  return Number.isFinite(extents.minX) && Number.isFinite(extents.minY) && Number.isFinite(extents.maxX) && Number.isFinite(extents.maxY);
+}
+
+function translateFlatPoints(points: number[] | undefined, dx: number, dy: number) {
+  if (!points) return points;
+  for (let index = 0; index < points.length; index += 2) {
+    points[index] += dx;
+    points[index + 1] += dy;
+  }
+  return points;
+}
+
+function translatePoint(point: CircuitPoint | undefined, dx: number, dy: number) {
+  if (!point) return;
+  point.x += dx;
+  point.y += dy;
+}
+
+function translateMetadataCoordinates(metadata: CircuitNode["metadata"], dx: number, dy: number) {
+  if (!metadata) return;
+  for (const key of ["labelX", "busX", "feedbackExitX"]) {
+    if (typeof metadata[key] === "number") metadata[key] = Number(metadata[key]) + dx;
+  }
+  for (const key of ["labelY", "feedbackLaneY"]) {
+    if (typeof metadata[key] === "number") metadata[key] = Number(metadata[key]) + dy;
+  }
+}
+
+function translateGraph(graph: CircuitGraph, dx: number, dy: number) {
+  if (!dx && !dy) return;
+  for (const node of graph.nodes) {
+    node.x += dx;
+    node.y += dy;
+    translateMetadataCoordinates(node.metadata, dx, dy);
+  }
+  for (const edge of graph.edges) {
+    translateFlatPoints(edge.points, dx, dy);
+    translatePoint(edge.sourceAnchor, dx, dy);
+    translatePoint(edge.targetAnchor, dx, dy);
+  }
+  translateFlatPoints(graph.clockLine.points, dx, dy);
+  graph.clockLine.branches.forEach((branch) => translateFlatPoints(branch, dx, dy));
+  graph.metadata.routingBounds?.forEach((bounds) => {
+    bounds.x += dx;
+    bounds.y += dy;
+  });
+}
+
+function normalizeCanvasBounds(graph: CircuitGraph, minimumWidth: number, minimumHeight: number) {
+  let extents = collectLayoutExtents(graph);
+  if (!isFiniteExtents(extents)) return;
+  const dx = Math.max(0, canvasPadding - extents.minX);
+  const dy = Math.max(0, canvasPadding - extents.minY);
+  translateGraph(graph, dx, dy);
+  extents = collectLayoutExtents(graph);
+  if (!isFiniteExtents(extents)) return;
+  graph.metadata.width = Math.max(Math.ceil(extents.maxX + canvasPadding), minimumWidth + dx);
+  graph.metadata.height = Math.max(Math.ceil(extents.maxY + canvasPadding), minimumHeight + dy);
 }
 
 export function layoutCircuitGraph(graph: CircuitGraph): CircuitGraph {
@@ -355,6 +458,7 @@ export function layoutCircuitGraph(graph: CircuitGraph): CircuitGraph {
   next.metadata.height = clockY + 72;
   next.metadata.generatedAt = new Date().toISOString();
   next.metadata.routingBounds = routingBounds;
+  normalizeCanvasBounds(next, stageWidth, clockY + 72);
   next.metadata.validationErrors = validateCircuitGraph(next);
   return next;
 }
