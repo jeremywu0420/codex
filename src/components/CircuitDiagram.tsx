@@ -1,14 +1,19 @@
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type Konva from "konva";
+import type { KonvaEventObject } from "konva/lib/Node";
 import { Circle, Group, Layer, Line, Path, Rect, Stage, Text } from "react-konva";
 import { layoutCircuitGraphApi } from "../api/circuitLayout";
 import { useCircuitStore } from "../store/useCircuitStore";
-import type { CircuitBounds, CircuitGraph, CircuitNode, CircuitPoint, Equation, FlipFlopType } from "../types";
+import type { CircuitBounds, CircuitEdge, CircuitGraph, CircuitNode, CircuitPoint, Equation, FlipFlopType } from "../types";
 
-const wire = "#1e293b";
+const wireBase = "#334155";
+const wireHighlight = "#7c3aed";
 const ink = "#1e293b";
 const clockColor = "#2563eb";
+const dimmedOpacity = 0.14;
 const gateStrokeWidth = 1.8;
+const minZoom = 0.3;
+const maxZoom = 2.6;
 const bodyShadow = {
   shadowColor: "rgba(15, 23, 42, 0.22)",
   shadowBlur: 5,
@@ -50,10 +55,23 @@ const ffPinsByType: Record<FlipFlopType, string[]> = {
   sr: ["S", "R"],
 };
 
+// Common 74-series part suggestions so the info card reads like a real schematic.
+const flipFlopPartByType: Record<FlipFlopType, string> = {
+  jk: "JK flip-flop (e.g. 7476)",
+  d: "D flip-flop (e.g. 7474)",
+  t: "T flip-flop",
+  sr: "SR latch / flip-flop",
+};
+
+function setCursor(event: KonvaEventObject<unknown>, cursor: string) {
+  const stage = event.target.getStage();
+  if (stage) stage.container().style.cursor = cursor;
+}
+
 function FormulaText({ x, y, label, size = 13 }: { x: number; y: number; label: string; size?: number }) {
   const [main, sub] = label.split("_");
   return (
-    <Group>
+    <Group listening={false}>
       <Text text={main} x={x} y={y} fontFamily="Times New Roman" fontSize={size} fontStyle="bold italic" fill={ink} />
       {sub ? (
         <Text
@@ -70,8 +88,8 @@ function FormulaText({ x, y, label, size = 13 }: { x: number; y: number; label: 
   );
 }
 
-function Junction({ x, y, color = wire }: { x: number; y: number; color?: string }) {
-  return <Circle x={x} y={y} radius={3.2} fill={color} />;
+function Junction({ x, y, color = wireBase }: { x: number; y: number; color?: string }) {
+  return <Circle x={x} y={y} radius={3.2} fill={color} listening={false} />;
 }
 
 function pointKey(point: { x: number; y: number }) {
@@ -80,31 +98,27 @@ function pointKey(point: { x: number; y: number }) {
 
 function AndGate({ node }: { node: CircuitNode }) {
   return (
-    <Group x={node.x} y={node.y}>
-      <Path
-        data="M0 0 L44 0 A22 22 0 0 1 44 44 L0 44 Z"
-        stroke={wire}
-        strokeWidth={gateStrokeWidth}
-        fill="white"
-        lineJoin="round"
-        {...bodyShadow}
-      />
-    </Group>
+    <Path
+      data={`M${node.x} ${node.y} L${node.x + 44} ${node.y} A22 22 0 0 1 ${node.x + 44} ${node.y + 44} L${node.x} ${node.y + 44} Z`}
+      stroke={wireBase}
+      strokeWidth={gateStrokeWidth}
+      fill="white"
+      lineJoin="round"
+      {...bodyShadow}
+    />
   );
 }
 
 function OrGate({ node }: { node: CircuitNode }) {
   return (
-    <Group x={node.x} y={node.y}>
-      <Path
-        data="M0 0 Q48 2 86 30 Q48 58 0 60 Q19 30 0 0 Z"
-        stroke={wire}
-        strokeWidth={gateStrokeWidth}
-        fill="white"
-        lineJoin="round"
-        {...bodyShadow}
-      />
-    </Group>
+    <Path
+      data={`M${node.x} ${node.y} Q${node.x + 48} ${node.y + 2} ${node.x + 86} ${node.y + 30} Q${node.x + 48} ${node.y + 58} ${node.x} ${node.y + 60} Q${node.x + 19} ${node.y + 30} ${node.x} ${node.y} Z`}
+      stroke={wireBase}
+      strokeWidth={gateStrokeWidth}
+      fill="white"
+      lineJoin="round"
+      {...bodyShadow}
+    />
   );
 }
 
@@ -113,14 +127,14 @@ function NotGate({ node }: { node: CircuitNode }) {
     <Group>
       <Line
         points={[node.x, node.y, node.x + 30, node.y + 15, node.x, node.y + 30, node.x, node.y]}
-        stroke={wire}
+        stroke={wireBase}
         strokeWidth={1.6}
         closed
         fill="white"
         lineJoin="round"
         {...bodyShadow}
       />
-      <Circle x={node.x + 35} y={node.y + 15} radius={5} stroke={wire} strokeWidth={1.6} fill="white" />
+      <Circle x={node.x + 35} y={node.y + 15} radius={5} stroke={wireBase} strokeWidth={1.6} fill="white" />
     </Group>
   );
 }
@@ -135,7 +149,7 @@ function FlipFlopBody({ node }: { node: CircuitNode }) {
         height={node.height ?? 124}
         cornerRadius={6}
         fill="white"
-        stroke={wire}
+        stroke={wireBase}
         strokeWidth={gateStrokeWidth}
         {...bodyShadow}
       />
@@ -144,6 +158,7 @@ function FlipFlopBody({ node }: { node: CircuitNode }) {
         stroke={clockColor}
         strokeWidth={1.7}
         lineJoin="round"
+        listening={false}
       />
     </Group>
   );
@@ -161,7 +176,7 @@ function FlipFlopLabels({ node }: { node: CircuitNode }) {
   const state = String(node.metadata?.state ?? node.label);
 
   return (
-    <Group>
+    <Group listening={false}>
       {pins.map((pin) => (
         <FormulaText key={pin} x={node.x + 14} y={node.y + flipFlopPinOffset(pin) - 13} label={`${pin}_${state}`} size={16} />
       ))}
@@ -203,6 +218,7 @@ function RoutingBounds({ bounds }: { bounds: CircuitBounds[] }) {
             stroke="#38bdf8"
             dash={[5, 4]}
             opacity={0.38}
+            listening={false}
           />
         );
       })}
@@ -215,57 +231,139 @@ function ClockLabels({ graph }: { graph: CircuitGraph }) {
   const [startX, startY, endX, endY] = graph.clockLine.points;
   return (
     <>
-      <Text text={graph.clockLine.label} x={startX + 8} y={startY + 8} fontFamily="Times New Roman" fontSize={16} fontStyle="bold italic" fill={clockColor} />
-      <Text text={graph.clockLine.label} x={endX + 8} y={endY - 10} fontFamily="Times New Roman" fontSize={16} fontStyle="bold italic" fill={clockColor} />
+      <Text text={graph.clockLine.label} x={startX + 8} y={startY + 8} fontFamily="Times New Roman" fontSize={16} fontStyle="bold italic" fill={clockColor} listening={false} />
+      <Text text={graph.clockLine.label} x={endX + 8} y={endY - 10} fontFamily="Times New Roman" fontSize={16} fontStyle="bold italic" fill={clockColor} listening={false} />
     </>
   );
 }
 
+type Interaction = {
+  activeNet: string | null;
+  activeNode: string | null;
+  hasFocus: boolean;
+  onHoverNet: (netId: string | null) => void;
+  onHoverNode: (nodeId: string | null) => void;
+  onSelectNet: (netId: string | null) => void;
+  onSelectNode: (nodeId: string | null) => void;
+};
+
 function RenderCircuitDiagram({
   graph,
   junctionDots,
+  interaction,
   showRoutingBounds = false,
 }: {
   graph: CircuitGraph;
   junctionDots: CircuitPoint[];
+  interaction: Interaction;
   showRoutingBounds?: boolean;
 }) {
   const gates = graph.nodes.filter((node) => node.type === "AND" || node.type === "OR" || node.type === "NOT");
   const flipFlops = graph.nodes.filter((node) => node.type === "FF");
+  const { activeNet, activeNode, hasFocus } = interaction;
+
+  const edgeIsActive = (edge: CircuitEdge) =>
+    (activeNet != null && edge.netId === activeNet) || (activeNode != null && (edge.from === activeNode || edge.to === activeNode));
+
+  // Nodes light up when selected/hovered directly or when they sit on an active signal path.
+  const activeNodeIds = useMemo(() => {
+    if (!hasFocus) return null;
+    const ids = new Set<string>();
+    if (activeNode) ids.add(activeNode);
+    for (const edge of graph.edges) {
+      if (edgeIsActive(edge)) {
+        ids.add(edge.from);
+        ids.add(edge.to);
+      }
+    }
+    return ids;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graph, activeNet, activeNode, hasFocus]);
+
+  const nodeOpacity = (node: CircuitNode) => (activeNodeIds && !activeNodeIds.has(node.id) ? dimmedOpacity : 1);
 
   return (
     <>
       {/* wires layer */}
-      {graph.edges.map((edge) =>
-        edge.points ? (
+      {graph.edges.map((edge) => {
+        if (!edge.points) return null;
+        const active = edgeIsActive(edge);
+        const dim = hasFocus && !active;
+        return (
           <Line
             key={edge.id}
             id={edge.wireId}
             name="circuit-wire"
             points={edge.points}
-            stroke={wire}
-            strokeWidth={1.6}
+            stroke={active ? wireHighlight : wireBase}
+            strokeWidth={active ? 2.6 : 1.6}
+            opacity={dim ? dimmedOpacity : 1}
+            hitStrokeWidth={12}
             lineJoin="round"
             lineCap="round"
+            onMouseEnter={(event) => {
+              setCursor(event, "pointer");
+              interaction.onHoverNet(edge.netId ?? null);
+            }}
+            onMouseLeave={(event) => {
+              setCursor(event, "default");
+              interaction.onHoverNet(null);
+            }}
+            onClick={(event) => {
+              event.cancelBubble = true;
+              interaction.onSelectNet(edge.netId ?? null);
+            }}
             {...{ "data-wire-id": edge.wireId }}
           />
-        ) : null,
-      )}
+        );
+      })}
       {graph.clockLine.points.length ? (
-        <Line points={graph.clockLine.points} stroke={clockColor} strokeWidth={1.7} lineJoin="round" lineCap="round" />
+        <Line points={graph.clockLine.points} stroke={clockColor} strokeWidth={1.7} opacity={hasFocus ? 0.3 : 1} lineJoin="round" lineCap="round" listening={false} />
       ) : null}
       {graph.clockLine.branches.map((branch, index) => (
-        <Group key={`clock-${index}-line`}>
-          <Line points={branch} stroke={clockColor} strokeWidth={1.7} lineJoin="round" lineCap="round" />
-        </Group>
+        <Line key={`clock-${index}-line`} points={branch} stroke={clockColor} strokeWidth={1.7} opacity={hasFocus ? 0.3 : 1} lineJoin="round" lineCap="round" listening={false} />
       ))}
       {/* gate body layer */}
       {gates.map((node) => (
-        <GateBody key={node.id} node={node} />
+        <Group
+          key={node.id}
+          opacity={nodeOpacity(node)}
+          onMouseEnter={(event) => {
+            setCursor(event, "pointer");
+            interaction.onHoverNode(node.id);
+          }}
+          onMouseLeave={(event) => {
+            setCursor(event, "default");
+            interaction.onHoverNode(null);
+          }}
+          onClick={(event) => {
+            event.cancelBubble = true;
+            interaction.onSelectNode(node.id);
+          }}
+        >
+          <GateBody node={node} />
+        </Group>
       ))}
       {/* flip-flop body layer */}
       {flipFlops.map((node) => (
-        <FlipFlopBody key={node.id} node={node} />
+        <Group
+          key={node.id}
+          opacity={nodeOpacity(node)}
+          onMouseEnter={(event) => {
+            setCursor(event, "pointer");
+            interaction.onHoverNode(node.id);
+          }}
+          onMouseLeave={(event) => {
+            setCursor(event, "default");
+            interaction.onHoverNode(null);
+          }}
+          onClick={(event) => {
+            event.cancelBubble = true;
+            interaction.onSelectNode(node.id);
+          }}
+        >
+          <FlipFlopBody node={node} />
+        </Group>
       ))}
       {showRoutingBounds ? <RoutingBounds bounds={graph.metadata.routingBounds ?? []} /> : null}
       {/* junction dots layer */}
@@ -278,7 +376,9 @@ function RenderCircuitDiagram({
       {/* labels layer */}
       <ClockLabels graph={graph} />
       {graph.nodes.map((node) => (
-        <NodeLabel key={node.id} node={node} />
+        <Group key={node.id} opacity={nodeOpacity(node)}>
+          <NodeLabel node={node} />
+        </Group>
       ))}
     </>
   );
@@ -361,6 +461,55 @@ function logCircuitGenerationDebug(graph: CircuitGraph, equations: Equation[], f
   console.groupEnd();
 }
 
+type ComponentInfo = {
+  title: string;
+  subtitle: string;
+  inputs: { pin: string; signal: string }[];
+  outputs: { pin: string; signal: string }[];
+};
+
+function describeNode(node: CircuitNode, graph: CircuitGraph): ComponentInfo {
+  const incoming = graph.edges.filter((edge) => edge.to === node.id);
+  const outgoing = graph.edges.filter((edge) => edge.from === node.id);
+  const incomingPin = (edge: CircuitEdge) =>
+    edge.toPin ?? (typeof edge.metadata?.gateInputIndex === "number" ? `in${edge.metadata.gateInputIndex}` : "in");
+
+  if (node.type === "FF") {
+    const type = node.flipFlopType ?? "jk";
+    const state = String(node.metadata?.state ?? node.label);
+    const pins = ffPinsByType[type];
+    const inputs = pins.map((pin) => ({
+      pin,
+      signal: incoming.find((edge) => edge.toPin === pin)?.netId ?? "—",
+    }));
+    return {
+      title: `${type.toUpperCase()} Flip-Flop ${state}`,
+      subtitle: `${flipFlopPartByType[type]} · clocked by ${graph.clockLine.label || "CLK"}`,
+      inputs: [...inputs, { pin: "CLK", signal: graph.clockLine.label || "CLK" }],
+      outputs: [
+        { pin: "Q", signal: outgoing.find((edge) => edge.fromPin === "Q")?.netId ?? state },
+        { pin: "Q'", signal: outgoing.find((edge) => edge.fromPin === "Q'")?.netId ?? `${state}'` },
+      ],
+    };
+  }
+  if (node.type === "AND" || node.type === "OR" || node.type === "NOT") {
+    const fn = node.type === "AND" ? "logical product" : node.type === "OR" ? "logical sum" : "inverter";
+    return {
+      title: `${node.type} gate`,
+      subtitle: `Combinational · ${fn}`,
+      inputs: incoming.map((edge) => ({ pin: incomingPin(edge), signal: edge.netId ?? "—" })),
+      outputs: outgoing.map((edge) => ({ pin: edge.fromPin ?? "out", signal: edge.netId ?? String(node.metadata?.outputNetId ?? "—") })),
+    };
+  }
+  const role = node.type === "INPUT" ? "Primary input" : node.type === "OUTPUT" ? "Primary output" : node.type === "STATE" ? "State feedback (Q)" : node.type === "STATE_NOT" ? "State feedback (Q')" : "Net";
+  return {
+    title: node.label,
+    subtitle: role,
+    inputs: incoming.map((edge) => ({ pin: incomingPin(edge), signal: edge.netId ?? "—" })),
+    outputs: outgoing.map((edge) => ({ pin: edge.fromPin ?? "out", signal: edge.netId ?? "—" })),
+  };
+}
+
 type CircuitDiagramProps = {
   showRoutingBounds?: boolean;
 };
@@ -368,6 +517,7 @@ type CircuitDiagramProps = {
 export function CircuitDiagram({ showRoutingBounds = false }: CircuitDiagramProps = {}) {
   const { circuitGraph, equations, flipFlopType, setGeneratedCircuitGraph, variables } = useCircuitStore();
   const stageRef = useRef<Konva.Stage>(null);
+  const stageWrapRef = useRef<HTMLDivElement>(null);
   const [graph, setGraph] = useState<CircuitGraph | null>(null);
   const [contentBounds, setContentBounds] = useState<CircuitBounds | null>(null);
   const [junctionDots, setJunctionDots] = useState<CircuitPoint[]>([]);
@@ -377,6 +527,13 @@ export function CircuitDiagram({ showRoutingBounds = false }: CircuitDiagramProp
   const [isLoading, setIsLoading] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [pendingFit, setPendingFit] = useState(false);
+
+  // Interaction state for hover/click signal tracing and the component info card.
+  const [hoveredNet, setHoveredNet] = useState<string | null>(null);
+  const [hoveredNode, setHoveredNode] = useState<string | null>(null);
+  const [selectedNet, setSelectedNet] = useState<string | null>(null);
+  const [selectedNode, setSelectedNode] = useState<string | null>(null);
 
   const currentSignature = useMemo(
     () => JSON.stringify({ equations, flipFlopType, variables }),
@@ -386,34 +543,77 @@ export function CircuitDiagram({ showRoutingBounds = false }: CircuitDiagramProp
   const isOutdated = Boolean(graph && generatedSignature !== currentSignature);
   const canUseDiagram = Boolean(graph && contentBounds);
 
+  const clearSelection = useCallback(() => {
+    setSelectedNet(null);
+    setSelectedNode(null);
+  }, []);
+
+  const fitToView = useCallback(() => {
+    const container = stageWrapRef.current;
+    if (!container || !contentBounds) return;
+    const availableWidth = container.clientWidth - 8;
+    const availableHeight = container.clientHeight - 8;
+    if (availableWidth <= 0 || availableHeight <= 0) return;
+    const factor = Math.min(availableWidth / contentBounds.width, availableHeight / contentBounds.height);
+    setZoom(Math.max(minZoom, Math.min(maxZoom, factor)));
+    setPosition({ x: 0, y: 0 });
+  }, [contentBounds]);
+
+  // Fit once after a fresh generate, when the container has its real size.
+  useLayoutEffect(() => {
+    if (!pendingFit || !contentBounds) return;
+    fitToView();
+    setPendingFit(false);
+  }, [pendingFit, contentBounds, fitToView]);
+
+  const selectedNodeData = useMemo(
+    () => (selectedNode && graph ? graph.nodes.find((node) => node.id === selectedNode) ?? null : null),
+    [selectedNode, graph],
+  );
+  const selectedInfo = useMemo(
+    () => (selectedNodeData && graph ? describeNode(selectedNodeData, graph) : null),
+    [selectedNodeData, graph],
+  );
+
+  const interaction: Interaction = {
+    activeNet: selectedNet ?? hoveredNet,
+    activeNode: selectedNode ?? hoveredNode,
+    hasFocus: Boolean(selectedNet ?? hoveredNet ?? selectedNode ?? hoveredNode),
+    onHoverNet: setHoveredNet,
+    onHoverNode: setHoveredNode,
+    onSelectNet: (netId) => {
+      setSelectedNode(null);
+      setSelectedNet(netId);
+    },
+    onSelectNode: (nodeId) => {
+      setSelectedNet(null);
+      setSelectedNode(nodeId);
+    },
+  };
+
+  function resetDiagramState(message: string) {
+    setGraph(null);
+    setContentBounds(null);
+    setJunctionDots([]);
+    setSvgMarkup("");
+    setGeneratedCircuitGraph(null);
+    clearSelection();
+    setError(message);
+  }
+
   async function generateCircuit() {
     if (isLoading) return;
     setError("");
     if (!equations.length) {
-      setGraph(null);
-      setContentBounds(null);
-      setJunctionDots([]);
-      setSvgMarkup("");
-      setGeneratedCircuitGraph(null);
-      setError("No equations available. Generate equations before creating the circuit.");
+      resetDiagramState("No equations available. Generate equations before creating the circuit.");
       return;
     }
     if (!variables.states.length) {
-      setGraph(null);
-      setContentBounds(null);
-      setJunctionDots([]);
-      setSvgMarkup("");
-      setGeneratedCircuitGraph(null);
-      setError("No state variables available. Add at least one state variable.");
+      resetDiagramState("No state variables available. Add at least one state variable.");
       return;
     }
     if (!flipFlopType) {
-      setGraph(null);
-      setContentBounds(null);
-      setJunctionDots([]);
-      setSvgMarkup("");
-      setGeneratedCircuitGraph(null);
-      setError("Select a flip-flop type before generating the circuit.");
+      resetDiagramState("Select a flip-flop type before generating the circuit.");
       return;
     }
 
@@ -424,12 +624,7 @@ export function CircuitDiagram({ showRoutingBounds = false }: CircuitDiagramProp
       const layoutedGraph = result.graph;
       logCircuitGenerationDebug(layoutedGraph, equations, flipFlopType);
       if (layoutedGraph.metadata.validationErrors?.length) {
-        setGraph(null);
-        setContentBounds(null);
-        setJunctionDots([]);
-        setSvgMarkup("");
-        setGeneratedCircuitGraph(null);
-        setError(`Circuit validation failed:\n${layoutedGraph.metadata.validationErrors.join("\n")}`);
+        resetDiagramState(`Circuit validation failed:\n${layoutedGraph.metadata.validationErrors.join("\n")}`);
         setIsLoading(false);
         return;
       }
@@ -439,23 +634,23 @@ export function CircuitDiagram({ showRoutingBounds = false }: CircuitDiagramProp
       setSvgMarkup(result.svg);
       setGeneratedCircuitGraph(layoutedGraph);
       setGeneratedSignature(currentSignature);
-      setPosition({ x: 0, y: 0 });
-      setZoom(1);
+      clearSelection();
+      setPendingFit(true);
     } catch (generationError) {
-      setGraph(null);
-      setContentBounds(null);
-      setJunctionDots([]);
-      setSvgMarkup("");
-      setGeneratedCircuitGraph(null);
-      setError(generationError instanceof Error ? generationError.message : "Circuit generation failed.");
+      resetDiagramState(generationError instanceof Error ? generationError.message : "Circuit generation failed.");
     } finally {
       setIsLoading(false);
     }
   }
 
   function resetView() {
-    setZoom(1);
-    setPosition({ x: 0, y: 0 });
+    fitToView();
+  }
+
+  function handleWheel(event: KonvaEventObject<WheelEvent>) {
+    event.evt.preventDefault();
+    const factor = event.evt.deltaY < 0 ? 1.1 : 1 / 1.1;
+    setZoom((value) => Math.max(minZoom, Math.min(maxZoom, value * factor)));
   }
 
   function downloadPng() {
@@ -475,14 +670,19 @@ export function CircuitDiagram({ showRoutingBounds = false }: CircuitDiagramProp
     link.click();
   }
 
+  useEffect(() => {
+    clearSelection();
+  }, [graph, clearSelection]);
+
   return (
     <section className="panel circuit-panel">
       <div className="diagram-tools">
         <button disabled={isLoading} onClick={generateCircuit} type="button">
           {isLoading ? "Generating..." : "Generate Circuit"}
         </button>
-        <button disabled={!canUseDiagram} onClick={() => setZoom((value) => Math.min(value + 0.15, 2.4))} type="button">Zoom +</button>
-        <button disabled={!canUseDiagram} onClick={() => setZoom((value) => Math.max(value - 0.15, 0.5))} type="button">Zoom -</button>
+        <button disabled={!canUseDiagram} onClick={() => setZoom((value) => Math.min(value + 0.15, maxZoom))} type="button">Zoom +</button>
+        <button disabled={!canUseDiagram} onClick={() => setZoom((value) => Math.max(value - 0.15, minZoom))} type="button">Zoom -</button>
+        <button disabled={!canUseDiagram} onClick={fitToView} type="button">Fit</button>
         <button disabled={!canUseDiagram} onClick={resetView} type="button">Reset View</button>
         <button disabled={!canUseDiagram} onClick={downloadPng} type="button">PNG</button>
         <button disabled={!canUseDiagram} onClick={downloadSvg} type="button">SVG</button>
@@ -490,8 +690,9 @@ export function CircuitDiagram({ showRoutingBounds = false }: CircuitDiagramProp
 
       {error ? <div className="diagram-alert error">{error}</div> : null}
       {isOutdated ? <div className="diagram-alert warning">Circuit is outdated. Click Generate Circuit again to update.</div> : null}
+      {canUseDiagram ? <p className="diagram-hint">Hover a part or wire to trace its signal · click for details · scroll to zoom · drag to pan.</p> : null}
 
-      <div className="stage-wrap" id="circuit-diagram">
+      <div className="stage-wrap" id="circuit-diagram" ref={stageWrapRef}>
         {!graph || !contentBounds ? (
           <div className="diagram-placeholder">Click Generate Circuit to create the circuit diagram from current equations.</div>
         ) : (
@@ -499,6 +700,11 @@ export function CircuitDiagram({ showRoutingBounds = false }: CircuitDiagramProp
             draggable
             height={Math.ceil(contentBounds.height * zoom)}
             onDragEnd={(event) => setPosition(event.target.position())}
+            onWheel={handleWheel}
+            onClick={(event) => {
+              // A click that reaches the stage background (not a wire/part) clears the selection.
+              if (event.target === event.target.getStage()) clearSelection();
+            }}
             ref={stageRef}
             scaleX={zoom}
             scaleY={zoom}
@@ -519,10 +725,48 @@ export function CircuitDiagram({ showRoutingBounds = false }: CircuitDiagramProp
               ) : (
                 <Rect x={contentBounds.x} y={contentBounds.y} width={contentBounds.width} height={contentBounds.height} fill="white" />
               )}
-              <RenderCircuitDiagram graph={graph} junctionDots={junctionDots} showRoutingBounds={showRoutingBounds} />
+              <RenderCircuitDiagram graph={graph} junctionDots={junctionDots} interaction={interaction} showRoutingBounds={showRoutingBounds} />
             </Layer>
           </Stage>
         )}
+
+        {selectedInfo ? (
+          <aside className="component-card" role="dialog" aria-label="Component details">
+            <header className="component-card-head">
+              <div>
+                <p className="component-card-title">{selectedInfo.title}</p>
+                <p className="component-card-subtitle">{selectedInfo.subtitle}</p>
+              </div>
+              <button aria-label="Close details" className="component-card-close" onClick={clearSelection} type="button">×</button>
+            </header>
+            <div className="component-card-pins">
+              <div>
+                <p className="component-card-section">Inputs</p>
+                {selectedInfo.inputs.length ? (
+                  <ul>
+                    {selectedInfo.inputs.map((entry) => (
+                      <li key={`in-${entry.pin}`}><span className="pin-name">{entry.pin}</span><span className="pin-signal">{entry.signal}</span></li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="component-card-empty">None</p>
+                )}
+              </div>
+              <div>
+                <p className="component-card-section">Outputs</p>
+                {selectedInfo.outputs.length ? (
+                  <ul>
+                    {selectedInfo.outputs.map((entry) => (
+                      <li key={`out-${entry.pin}`}><span className="pin-name">{entry.pin}</span><span className="pin-signal">{entry.signal}</span></li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="component-card-empty">None</p>
+                )}
+              </div>
+            </div>
+          </aside>
+        ) : null}
       </div>
     </section>
   );
