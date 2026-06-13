@@ -3,6 +3,8 @@ import type Konva from "konva";
 import type { KonvaEventObject } from "konva/lib/Node";
 import { Circle, Group, Layer, Line, Path, Rect, Stage, Text } from "react-konva";
 import { layoutCircuitGraphApi } from "../api/circuitLayout";
+import { evaluateNetValues, nextStateValues, toCircuitModel } from "../logic/circuit";
+import type { SignalValue } from "../logic/circuit";
 import { useCircuitStore } from "../store/useCircuitStore";
 import type { CircuitBounds, CircuitEdge, CircuitGraph, CircuitNode, CircuitPoint, Equation, FlipFlopType } from "../types";
 
@@ -11,6 +13,12 @@ const wireHighlight = "#7c3aed";
 const ink = "#1e293b";
 const clockColor = "#2563eb";
 const dimmedOpacity = 0.14;
+
+const valueColors: Record<SignalValue, string> = {
+  "1": "#16a34a",
+  "0": "#64748b",
+  X: "#d97706",
+};
 const gateStrokeWidth = 1.8;
 const minZoom = 0.3;
 const maxZoom = 2.6;
@@ -247,15 +255,21 @@ type Interaction = {
   onSelectNode: (nodeId: string | null) => void;
 };
 
+type ValueChip = { x: number; y: number; value: SignalValue };
+
 function RenderCircuitDiagram({
   graph,
   junctionDots,
   interaction,
+  styleForEdge,
+  valueChips,
   showRoutingBounds = false,
 }: {
   graph: CircuitGraph;
   junctionDots: CircuitPoint[];
   interaction: Interaction;
+  styleForEdge: (edge: CircuitEdge) => { stroke: string; width: number };
+  valueChips: ValueChip[];
   showRoutingBounds?: boolean;
 }) {
   const gates = graph.nodes.filter((node) => node.type === "AND" || node.type === "OR" || node.type === "NOT");
@@ -289,14 +303,15 @@ function RenderCircuitDiagram({
         if (!edge.points) return null;
         const active = edgeIsActive(edge);
         const dim = hasFocus && !active;
+        const style = styleForEdge(edge);
         return (
           <Line
             key={edge.id}
             id={edge.wireId}
             name="circuit-wire"
             points={edge.points}
-            stroke={active ? wireHighlight : wireBase}
-            strokeWidth={active ? 2.6 : 1.6}
+            stroke={active ? wireHighlight : style.stroke}
+            strokeWidth={active ? 2.6 : style.width}
             opacity={dim ? dimmedOpacity : 1}
             hitStrokeWidth={12}
             lineJoin="round"
@@ -378,6 +393,13 @@ function RenderCircuitDiagram({
       {graph.nodes.map((node) => (
         <Group key={node.id} opacity={nodeOpacity(node)}>
           <NodeLabel node={node} />
+        </Group>
+      ))}
+      {/* signal value chips (Values mode) */}
+      {valueChips.map((chip, index) => (
+        <Group key={`value-${index}-${chip.x}-${chip.y}`} x={chip.x + 4} y={chip.y - 8} listening={false}>
+          <Rect width={13} height={14} cornerRadius={3} fill={valueColors[chip.value]} opacity={0.92} />
+          <Text text={chip.value} x={0} y={1} width={13} height={13} align="center" fontSize={11} fontStyle="bold" fill="#ffffff" />
         </Group>
       ))}
     </>
@@ -515,7 +537,7 @@ type CircuitDiagramProps = {
 };
 
 export function CircuitDiagram({ showRoutingBounds = false }: CircuitDiagramProps = {}) {
-  const { circuitGraph, equations, flipFlopType, setGeneratedCircuitGraph, variables } = useCircuitStore();
+  const { circuitGraph, equations, flipFlopType, initialStateBits, setGeneratedCircuitGraph, variables } = useCircuitStore();
   const stageRef = useRef<Konva.Stage>(null);
   const stageWrapRef = useRef<HTMLDivElement>(null);
   const [graph, setGraph] = useState<CircuitGraph | null>(null);
@@ -534,6 +556,11 @@ export function CircuitDiagram({ showRoutingBounds = false }: CircuitDiagramProp
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [selectedNet, setSelectedNet] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
+
+  // Signal-probe state: live 0/1/X values driven by input + present-state toggles.
+  const [showValues, setShowValues] = useState(false);
+  const [inputValues, setInputValues] = useState<Record<string, SignalValue>>({});
+  const [stateValues, setStateValues] = useState<Record<string, SignalValue>>({});
 
   const currentSignature = useMemo(
     () => JSON.stringify({ equations, flipFlopType, variables }),
@@ -574,6 +601,67 @@ export function CircuitDiagram({ showRoutingBounds = false }: CircuitDiagramProp
     () => (selectedNodeData && graph ? describeNode(selectedNodeData, graph) : null),
     [selectedNodeData, graph],
   );
+
+  // Per-net colour/bus metadata from the view-model, used to colour wires by signal.
+  const netMeta = useMemo(() => {
+    const map = new Map<string, { color: string; isBus: boolean }>();
+    if (!graph) return map;
+    for (const wire of toCircuitModel(graph).wires) {
+      if (!map.has(wire.netId)) map.set(wire.netId, { color: wire.color, isBus: wire.isBus });
+    }
+    return map;
+  }, [graph]);
+
+  // Live signal values for the current probe (only computed in Values mode).
+  const netValues = useMemo(
+    () => (graph && showValues ? evaluateNetValues(graph, inputValues, stateValues) : null),
+    [graph, showValues, inputValues, stateValues],
+  );
+
+  const styleForEdge = useCallback(
+    (edge: CircuitEdge) => {
+      const netId = edge.netId ?? "";
+      const meta = netMeta.get(netId);
+      const value = netValues?.get(netId);
+      if (value) return { stroke: valueColors[value], width: meta?.isBus ? 2.4 : 1.8 };
+      return { stroke: meta?.color ?? wireBase, width: meta?.isBus ? 2 : 1.6 };
+    },
+    [netMeta, netValues],
+  );
+
+  const valueChips = useMemo<ValueChip[]>(() => {
+    if (!graph || !netValues) return [];
+    const seen = new Set<string>();
+    const chips: ValueChip[] = [];
+    for (const edge of graph.edges) {
+      const netId = edge.netId ?? "";
+      if (!netId || seen.has(netId)) continue;
+      const value = netValues.get(netId);
+      if (!value) continue;
+      const anchor = edge.sourceAnchor ?? (edge.points && edge.points.length >= 2 ? { x: edge.points[0], y: edge.points[1] } : null);
+      if (!anchor) continue;
+      seen.add(netId);
+      chips.push({ x: anchor.x, y: anchor.y, value });
+    }
+    return chips;
+  }, [graph, netValues]);
+
+  const resetProbes = useCallback(() => {
+    const inputs: Record<string, SignalValue> = {};
+    for (const name of variables.inputs) inputs[name] = "0";
+    const states: Record<string, SignalValue> = {};
+    variables.states.forEach((name, index) => {
+      states[name] = initialStateBits?.[index] === "1" ? "1" : "0";
+    });
+    setInputValues(inputs);
+    setStateValues(states);
+  }, [variables, initialStateBits]);
+
+  const stepClock = useCallback(() => {
+    if (!graph) return;
+    const values = evaluateNetValues(graph, inputValues, stateValues);
+    setStateValues(nextStateValues(graph, values, stateValues));
+  }, [graph, inputValues, stateValues]);
 
   const interaction: Interaction = {
     activeNet: selectedNet ?? hoveredNet,
@@ -674,6 +762,11 @@ export function CircuitDiagram({ showRoutingBounds = false }: CircuitDiagramProp
     clearSelection();
   }, [graph, clearSelection]);
 
+  // Seed the probe with primary inputs at 0 and the configured initial state on each generate.
+  useEffect(() => {
+    if (graph) resetProbes();
+  }, [graph, resetProbes]);
+
   return (
     <section className="panel circuit-panel">
       <div className="diagram-tools">
@@ -684,9 +777,47 @@ export function CircuitDiagram({ showRoutingBounds = false }: CircuitDiagramProp
         <button disabled={!canUseDiagram} onClick={() => setZoom((value) => Math.max(value - 0.15, minZoom))} type="button">Zoom -</button>
         <button disabled={!canUseDiagram} onClick={fitToView} type="button">Fit</button>
         <button disabled={!canUseDiagram} onClick={resetView} type="button">Reset View</button>
+        <button
+          aria-pressed={showValues}
+          className={showValues ? "is-active" : ""}
+          disabled={!canUseDiagram}
+          onClick={() => setShowValues((value) => !value)}
+          type="button"
+        >
+          {showValues ? "Values: On" : "Values"}
+        </button>
         <button disabled={!canUseDiagram} onClick={downloadPng} type="button">PNG</button>
         <button disabled={!canUseDiagram} onClick={downloadSvg} type="button">SVG</button>
       </div>
+
+      {canUseDiagram && showValues ? (
+        <div className="diagram-probe">
+          <span className="probe-label">Inputs</span>
+          {variables.inputs.map((name) => (
+            <button
+              className={`probe-toggle value-${inputValues[name] ?? "0"}`}
+              key={`in-${name}`}
+              onClick={() => setInputValues((prev) => ({ ...prev, [name]: prev[name] === "1" ? "0" : "1" }))}
+              type="button"
+            >
+              {name}=<b>{inputValues[name] ?? "0"}</b>
+            </button>
+          ))}
+          <span className="probe-label">State</span>
+          {variables.states.map((name) => (
+            <button
+              className={`probe-toggle value-${stateValues[name] ?? "0"}`}
+              key={`st-${name}`}
+              onClick={() => setStateValues((prev) => ({ ...prev, [name]: prev[name] === "1" ? "0" : "1" }))}
+              type="button"
+            >
+              {name}=<b>{stateValues[name] ?? "0"}</b>
+            </button>
+          ))}
+          <button className="probe-action" onClick={stepClock} type="button">Clock ▶</button>
+          <button className="probe-action" onClick={resetProbes} type="button">Reset</button>
+        </div>
+      ) : null}
 
       {error ? <div className="diagram-alert error">{error}</div> : null}
       {isOutdated ? <div className="diagram-alert warning">Circuit is outdated. Click Generate Circuit again to update.</div> : null}
@@ -725,7 +856,14 @@ export function CircuitDiagram({ showRoutingBounds = false }: CircuitDiagramProp
               ) : (
                 <Rect x={contentBounds.x} y={contentBounds.y} width={contentBounds.width} height={contentBounds.height} fill="white" />
               )}
-              <RenderCircuitDiagram graph={graph} junctionDots={junctionDots} interaction={interaction} showRoutingBounds={showRoutingBounds} />
+              <RenderCircuitDiagram
+                graph={graph}
+                junctionDots={junctionDots}
+                interaction={interaction}
+                styleForEdge={styleForEdge}
+                valueChips={valueChips}
+                showRoutingBounds={showRoutingBounds}
+              />
             </Layer>
           </Stage>
         )}

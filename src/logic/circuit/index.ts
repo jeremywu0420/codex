@@ -9,3 +9,5 @@ export * from "./validation";
 export * from "./junctions";
 export * from "./render";
 export * from "./layout";
+export * from "./model";
+export * from "./simulate";
