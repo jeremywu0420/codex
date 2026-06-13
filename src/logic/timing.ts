@@ -69,6 +69,17 @@ function copyBitRecord(names: string[], source: Record<string, unknown>, section
   ) as Record<string, Bit>;
 }
 
+/**
+ * Coerce a stored initial-state string into exactly `width` binary digits. Anything that
+ * is not a full-width binary string falls back to the all-zeros reset, matching the
+ * generated Verilog reset (which defaults to all-zeros when no valid initial state is set).
+ */
+export function normalizeStateBits(bits: string | undefined, width: number): string {
+  const candidate = (bits ?? "").slice(0, width);
+  if (candidate.length === width && /^[01]+$/.test(candidate)) return candidate;
+  return "0".repeat(width);
+}
+
 export function buildDefaultInputSequence(inputVars: string[], cycleCount = 8) {
   return Array.from({ length: cycleCount }, (_, step) =>
     Object.fromEntries(
