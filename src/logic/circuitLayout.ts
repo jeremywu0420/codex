@@ -581,7 +581,7 @@ export function routeOrthogonalEdge(edge: CircuitEdge, nodes: CircuitNode[], obs
   const { fromNode, toNode, sourceAnchor: from, targetAnchor: to } = resolved;
 
   const activeObstacles = obstacles.filter((bounds) => bounds.id !== fromNode.id && bounds.id !== toNode.id);
-  const selectRoute = createRouteCandidateSelector(activeObstacles, usedSegments, edge.from);
+  const selectRoute = createRouteCandidateSelector(activeObstacles, usedSegments, edge.netId ?? edge.from);
 
   if (fromNode.type === "FF" && (toNode.type === "STATE" || toNode.type === "STATE_NOT")) {
     const stateTap = compactPoints([from, { x: to.x, y: from.y }, to]);
@@ -615,6 +615,24 @@ export function routeOrthogonalEdge(edge: CircuitEdge, nodes: CircuitNode[], obs
     if (feedbackFallback) return feedbackFallback;
   }
 
+  if (isGate(fromNode) && isGate(toNode)) {
+    // Gate-to-gate wires (e.g. an AND product term feeding an OR sum) drop down a
+    // dedicated vertical lane. When the default lane collides with another net,
+    // shift the lane sideways until an unused track is found so product terms
+    // reach separate OR inputs instead of merging onto a shared segment.
+    const baseLaneX = fromNode.type === "AND" && toNode.type === "OR"
+      ? zone.productX + 92 + edgeInputIndex(edge) * 26
+      : Math.round((from.x + to.x) / 2);
+    const minLaneX = gateOutputExit(from).x;
+    for (let step = 0; step <= 20; step += 1) {
+      for (const direction of step === 0 ? [0] : [1, -1]) {
+        const laneX = Math.max(minLaneX, baseLaneX + direction * step * channelStep);
+        const candidate = laneRoute(from, to, laneX);
+        if (selectRoute.isPreferred(candidate)) return candidate;
+      }
+    }
+  }
+
   const bends = obstacleBendXCandidates(from, to, activeObstacles);
   for (const bendX of bends) {
     const candidate = routeOrthogonal(from, to, bendX);
@@ -643,16 +661,22 @@ function routeEdges(edges: CircuitEdge[], nodes: CircuitNode[], rawBounds: Circu
       edge.targetAnchor = resolved.targetAnchor;
     }
     edge.wireId = makeWireId(edge);
+    // Each wire belongs to exactly one net. Only wires of the same net may share
+    // a segment (they carry the same signal); different nets must be rerouted.
+    const netSignalId = edge.netId ?? edge.from;
     const deterministicPoints = deterministicRouteEdge(edge, nodes);
     const activeBounds = resolved ? rawBounds.filter((bounds) => bounds.id !== resolved.fromNode.id && bounds.id !== resolved.toNode.id) : rawBounds;
-    const routedPoints = pathIntersectsObstacles(deterministicPoints, activeBounds)
+    const deterministicConflicts =
+      pathIntersectsObstacles(deterministicPoints, activeBounds) ||
+      pathOverlapsSegments(deterministicPoints, usedSegments, netSignalId);
+    const routedPoints = deterministicConflicts
       ? routeOrthogonalEdge(edge, nodes, rawBounds, usedSegments)
       : deterministicPoints;
     edge.points = flattenPoints(routedPoints);
     usedSegments.push(
       ...pointsToSegments(routedPoints).map((segment) => ({
         ...segment,
-        signalId: edge.netId ?? edge.from,
+        signalId: netSignalId,
       })),
     );
     validateWire(edge);

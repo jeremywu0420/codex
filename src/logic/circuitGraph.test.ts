@@ -659,6 +659,25 @@ describe("circuit graph generation", () => {
     expect(new Set(kEdges.map((edge) => edge.netId))).toEqual(new Set(["XNOT"]));
   });
 
+  it("reroutes shared product terms feeding different OR gates onto independent segments", () => {
+    const graph = buildAndLayout("jk", ["A", "B"], {
+      J_A: "BX' + B'X + A + A'B",
+      K_A: "BX' + B'X + A'X + X'",
+      J_B: "BX' + B'X + AB' + AB",
+      K_B: "BX' + B'X + AX + B'",
+      Z: "AB + A'B'",
+    });
+
+    const sharedSegmentErrors = (graph.metadata.validationErrors ?? []).filter((error) =>
+      error.includes("share wire segment"),
+    );
+    expect(sharedSegmentErrors).toEqual([]);
+    expect(graph.metadata.validationErrors ?? []).toEqual([]);
+    expectNoFullyOverlappedWireSegments(graph);
+    expectAllWiresAreOrthogonal(graph);
+    expectNoWireObstacleCollisions(graph);
+  });
+
   it("fans out shared D flip-flop input expressions without net conflicts", () => {
     const graph = buildAndLayout("d", ["A", "B"], {
       D_A: "X'",
