@@ -1,11 +1,22 @@
 import { useEffect, useRef, useState } from "react";
 import { exportTimingPNG, exportTimingSVG } from "../export/timing";
-import { buildDefaultInputSequence } from "../logic/timing";
 import { useCircuitStore } from "../store/useCircuitStore";
 import { SimulationControls } from "./timing/SimulationControls";
 import { TimingDiagram } from "./timing/TimingDiagram";
 import { useSimulation } from "./timing/useSimulation";
 import type { SimulationCycle } from "./timing/useSimulation";
+
+function buildDefaultInputSequence(inputNames: string[], cycleCount = 8) {
+  return Array.from({ length: cycleCount }, (_, step) =>
+    Object.fromEntries(
+      inputNames.map((inputName, inputIndex) => {
+        const shift = Math.max(inputNames.length - inputIndex - 1, 0);
+        const value = inputNames.length === 1 ? step % 2 : (step >> shift) & 1;
+        return [inputName, value ? "1" : "0"];
+      }),
+    ) as Record<string, string>,
+  );
+}
 
 function inputSequenceToText(sequence: Record<string, string>[], inputNames: string[]) {
   return sequence.map((frame) => inputNames.map((inputName) => frame[inputName]).join("")).join(" ");
@@ -26,6 +37,7 @@ export function TimingDiagramPanel() {
     currentStep,
     error,
     isAutoRunning,
+    isLoading,
     jumpToStep,
     maxStep,
     reset,
@@ -122,7 +134,9 @@ export function TimingDiagramPanel() {
       {error ? <div className="diagram-alert error">{error}</div> : null}
 
       <div className="timing-scroll interactive-timing-scroll" id="timing-diagram" ref={diagramRef}>
-        {!canUseTiming || !simulation ? (
+        {isLoading ? (
+          <div className="diagram-placeholder">Preparing timing simulation from backend...</div>
+        ) : !canUseTiming || !simulation ? (
           <div className="diagram-placeholder">Timing simulation is unavailable for the current input sequence.</div>
         ) : (
           <TimingDiagram currentStep={currentStep} cycles={simulation.cycles} onSelectStep={jumpToStep} variables={variables} />

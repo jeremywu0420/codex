@@ -32,7 +32,7 @@ function check(result: ReturnType<typeof verifyAllResults>, name: string) {
   return found;
 }
 
-function resetStoreToKnownDTable() {
+async function resetStoreToKnownDTable() {
   useCircuitStore.getState().setModelType("mealy");
   useCircuitStore.getState().setFlipFlopType("d");
   useCircuitStore.getState().setVariables({ inputs: ["X"], outputs: ["Z"] });
@@ -46,6 +46,7 @@ function resetStoreToKnownDTable() {
 
   useCircuitStore.getState().setGeneratedCircuitGraph(null);
   useCircuitStore.getState().setTimingTrace(null);
+  await useCircuitStore.getState().recompute();
 }
 
 function storeCheck(name: string) {
@@ -54,13 +55,14 @@ function storeCheck(name: string) {
   return found;
 }
 
-function generateCircuitInStore() {
+async function generateCircuitInStore() {
   const graph = layoutCircuitGraph(useCircuitStore.getState().circuitGraph);
   useCircuitStore.getState().setGeneratedCircuitGraph(graph);
+  await useCircuitStore.getState().recompute();
   return graph;
 }
 
-function generateTimingInStore() {
+async function generateTimingInStore() {
   const state = useCircuitStore.getState();
   const timingData = generateTimingData(
     state.stateTable,
@@ -72,6 +74,7 @@ function generateTimingInStore() {
     buildDefaultInputSequence(state.variables.inputs, 4),
   );
   useCircuitStore.getState().setTimingTrace(timingData.steps);
+  await useCircuitStore.getState().recompute();
   return timingData.steps;
 }
 
@@ -85,8 +88,8 @@ function flipFirstNextStateBit(row: StateTableRow) {
 }
 
 describe("verification black-box scenarios", () => {
-  beforeEach(() => {
-    resetStoreToKnownDTable();
+  beforeEach(async () => {
+    await resetStoreToKnownDTable();
   });
 
   it("1. passes a correct D flip-flop state table", () => {
@@ -187,9 +190,9 @@ describe("verification black-box scenarios", () => {
     expect(check(result, "Circuit graph check")).toMatchObject({ skipped: true, passed: false });
   });
 
-  it("7. clears generated timing and circuit state after a state-table row edit", () => {
-    generateCircuitInStore();
-    generateTimingInStore();
+  it("7. clears generated timing and circuit state after a state-table row edit", async () => {
+    await generateCircuitInStore();
+    await generateTimingInStore();
     const previousVerification = useCircuitStore.getState().verification;
     const row = useCircuitStore.getState().stateTable[0];
 
@@ -204,8 +207,8 @@ describe("verification black-box scenarios", () => {
     expect(storeCheck("Timing trace check")).toMatchObject({ skipped: true, passed: false });
   });
 
-  it("8. clears generatedCircuitGraph after a circuit generation failure path", () => {
-    generateCircuitInStore();
+  it("8. clears generatedCircuitGraph after a circuit generation failure path", async () => {
+    await generateCircuitInStore();
     expect(storeCheck("Circuit graph check").passed).toBe(true);
 
     useCircuitStore.getState().setGeneratedCircuitGraph(null);
@@ -214,8 +217,8 @@ describe("verification black-box scenarios", () => {
     expect(storeCheck("Circuit graph check")).toMatchObject({ skipped: true, passed: false });
   });
 
-  it("9. clears timingTrace after a timing generation failure path", () => {
-    generateTimingInStore();
+  it("9. clears timingTrace after a timing generation failure path", async () => {
+    await generateTimingInStore();
     expect(storeCheck("Timing trace check").passed).toBe(true);
 
     useCircuitStore.getState().setTimingTrace(null);

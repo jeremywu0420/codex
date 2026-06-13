@@ -1,7 +1,7 @@
 {
   "name": "sequential-circuit-studio",
   "version": "1.0.0",
-  "description": "Client-side EDA workbench for sequential circuit design: state tables to state diagrams, excitation tables, K-maps, circuit schematics, timing diagrams and Verilog.",
+  "description": "Serverless-backed EDA workbench for sequential circuit design: state tables to state diagrams, excitation tables, K-maps, circuit schematics, timing diagrams and Verilog.",
   "keywords": [
     "eda",
     "digital-logic",
@@ -24,7 +24,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5174 --strictPort",
-    "build": "tsc -b && vite build",
+    "build": "node scripts/clean-dist.cjs && tsc -b && vite build --emptyOutDir=false",
     "test": "vitest run",
     "preview": "vite preview --host 0.0.0.0 --port 5174 --strictPort"
   },

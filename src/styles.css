@@ -1925,6 +1925,12 @@ th {
   filter: brightness(1.07);
 }
 
+.simulation-actions button:disabled {
+  cursor: not-allowed;
+  filter: none;
+  opacity: 0.6;
+}
+
 .simulation-error {
   margin: 10px 12px 0;
 }

@@ -45,6 +45,8 @@ export interface KMapModel {
   equationId: string;
   rowVariables: string[];
   colVariables: string[];
+  rowLabels: string[];
+  colLabels: string[];
   cells: KMapCell[];
   groups: KMapGroup[];
 }

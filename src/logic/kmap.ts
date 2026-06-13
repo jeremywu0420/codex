@@ -45,6 +45,8 @@ export function buildKMap(equation: Equation): KMapModel {
     equationId: equation.id,
     rowVariables,
     colVariables,
+    rowLabels,
+    colLabels,
     cells,
     groups: groupKMap(equation, cells),
   };

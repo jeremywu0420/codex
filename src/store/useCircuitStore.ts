@@ -1,12 +1,9 @@
 import { create } from "zustand";
 import type { Bit, CircuitGraph, Equation, FlipFlopType, KMapModel, LogicValue, ModelType, StateTableRow, Variables } from "../types";
-import { buildCircuitGraph } from "../logic/circuitGraph";
-import { deriveSequentialPipeline } from "../logic/equations";
-import { buildKMap } from "../logic/kmap";
+import { computeWorkspaceApi } from "../api/workspaceCompute";
+import type { WorkspaceComputeResult } from "../api/workspaceCompute";
 import type { TimingStep } from "../logic/timing";
-import { verifyAllResults } from "../lib/verification";
 import type { VerificationResult } from "../lib/verification";
-import { lintDesign } from "../lib/designLint";
 import type { DesignLintResult } from "../lib/designLint";
 import { decodeWorkspaceHash, parseWorkspaceJson, serializeWorkspace } from "../lib/workspace";
 import type { WorkspaceSnapshot } from "../lib/workspace";
@@ -26,6 +23,7 @@ interface CircuitState extends WorkspaceSnapshot {
   timingTrace: TimingStep[] | null;
   verification: VerificationResult;
   lint: DesignLintResult;
+  computeError: string;
   history: WorkspaceSnapshot[];
   future: WorkspaceSnapshot[];
   setModelType: (modelType: ModelType) => void;
@@ -43,7 +41,7 @@ interface CircuitState extends WorkspaceSnapshot {
   redo: () => void;
   setGeneratedCircuitGraph: (generatedCircuitGraph: CircuitGraph | null) => void;
   setTimingTrace: (timingTrace: TimingStep[] | null) => void;
-  recompute: () => void;
+  recompute: () => Promise<void>;
 }
 
 const initialVariables: Variables = {
@@ -181,66 +179,62 @@ function normalizeMooreOutputs(stateTable: StateTableRow[], variables: Variables
   }));
 }
 
-function buildVerification(
-  modelType: ModelType,
-  flipFlopType: FlipFlopType,
-  variables: Variables,
-  stateTable: StateTableRow[],
-  nextStateEquations: Equation[],
-  excitationEquations: Equation[],
-  outputEquations: Equation[],
-  timingTrace: TimingStep[] | null,
-  generatedCircuitGraph: CircuitGraph | null,
-) {
-  return verifyAllResults({
-    stateTable,
-    modelType,
-    flipFlopType,
-    variables,
-    nextStateEquations,
-    excitationEquations,
-    outputEquations,
-    timingTrace,
-    circuitGraph: generatedCircuitGraph,
-  });
+function emptyCircuitGraph(snapshot: WorkspaceSnapshot): CircuitGraph {
+  return {
+    nodes: [],
+    edges: [],
+    clockLine: {
+      label: snapshot.variables.clock,
+      points: [],
+      branches: [],
+    },
+    metadata: {
+      width: 0,
+      height: 0,
+      flipFlopType: snapshot.flipFlopType,
+      stateVariables: snapshot.variables.states,
+      inputVariables: snapshot.variables.inputs,
+      outputVariables: snapshot.variables.outputs,
+    },
+  };
 }
 
-function compute(
-  modelType: ModelType,
-  flipFlopType: FlipFlopType,
-  variables: Variables,
-  stateTable: StateTableRow[],
-  initialStateBits: string,
-  timingTrace: TimingStep[] | null = null,
-  generatedCircuitGraph: CircuitGraph | null = null,
-) {
-  const pipeline = deriveSequentialPipeline(stateTable, variables, modelType, flipFlopType);
-  const equations = pipeline.circuitEquations;
-  const kMaps = equations.map(buildKMap);
-  const circuitGraph = buildCircuitGraph({ equations, flipFlopType, variables });
-  const verification = buildVerification(
-    modelType,
-    flipFlopType,
-    variables,
-    stateTable,
-    pipeline.nextStateEquations,
-    pipeline.excitationEquations,
-    pipeline.outputEquations,
-    timingTrace,
-    generatedCircuitGraph,
-  );
-  const lint = lintDesign({ stateTable, variables, modelType, initialStateBits });
+function pendingVerification(): VerificationResult {
   return {
-    nextStateEquations: pipeline.nextStateEquations,
-    excitationEquations: pipeline.excitationEquations,
-    outputEquations: pipeline.outputEquations,
-    equations,
-    kMaps,
-    circuitGraph,
+    passed: false,
+    checks: [
+      { name: "State transition check", passed: false, skipped: true, message: "Waiting for backend workspace compute." },
+      { name: "Flip-flop excitation check", passed: false, skipped: true, message: "Waiting for backend workspace compute." },
+      { name: "Output equation check", passed: false, skipped: true, message: "Waiting for backend workspace compute." },
+      { name: "Timing trace check", passed: false, skipped: true, message: "Waiting for backend workspace compute." },
+      { name: "Circuit graph check", passed: false, skipped: true, message: "Waiting for backend workspace compute." },
+    ],
+    mismatches: [],
+    warnings: [],
+  };
+}
+
+function emptyLint(): DesignLintResult {
+  return {
+    issues: [],
+    errorCount: 0,
+    warningCount: 0,
+    infoCount: 0,
+  };
+}
+
+function emptyComputed(snapshot: WorkspaceSnapshot, generatedCircuitGraph: CircuitGraph | null = null, timingTrace: TimingStep[] | null = null): WorkspaceComputeResult {
+  return {
+    nextStateEquations: [],
+    excitationEquations: [],
+    outputEquations: [],
+    equations: [],
+    kMaps: [],
+    circuitGraph: emptyCircuitGraph(snapshot),
     generatedCircuitGraph,
     timingTrace,
-    verification,
-    lint,
+    verification: pendingVerification(),
+    lint: emptyLint(),
   };
 }
 
@@ -317,24 +311,40 @@ const factorySnapshot: WorkspaceSnapshot = {
 
 // Share links take priority over the autosaved workspace, then factory defaults.
 const startupSnapshot = loadWorkspaceFromShareLink() ?? loadWorkspaceFromStorage() ?? factorySnapshot;
-const initialComputed = compute(
-  startupSnapshot.modelType,
-  startupSnapshot.flipFlopType,
-  startupSnapshot.variables,
-  startupSnapshot.stateTable,
-  startupSnapshot.initialStateBits,
-);
+const initialComputed = emptyComputed(startupSnapshot);
 
 export const useCircuitStore = create<CircuitState>((set, get) => {
+  let computeRequestId = 0;
+
+  async function refreshDerived(
+    snapshot: WorkspaceSnapshot,
+    generatedCircuitGraph: CircuitGraph | null = null,
+    timingTrace: TimingStep[] | null = null,
+  ) {
+    const requestId = ++computeRequestId;
+    try {
+      const result = await computeWorkspaceApi({
+        ...snapshot,
+        generatedCircuitGraph,
+        timingTrace,
+      });
+      if (requestId !== computeRequestId) return;
+      set({ ...result, computeError: "" });
+    } catch (error) {
+      if (requestId !== computeRequestId) return;
+      set({ computeError: error instanceof Error ? error.message : "Workspace compute failed." });
+    }
+  }
+
   function pushHistory() {
     const history = [...get().history, snapshotOf(get())].slice(-HISTORY_LIMIT);
     return { history, future: [] as WorkspaceSnapshot[] };
   }
 
   function applySnapshot(snapshot: WorkspaceSnapshot, historyPatch: Pick<CircuitState, "history" | "future">) {
-    const next = compute(snapshot.modelType, snapshot.flipFlopType, snapshot.variables, snapshot.stateTable, snapshot.initialStateBits);
-    set({ ...snapshot, ...next, ...historyPatch });
+    set({ ...snapshot, ...emptyComputed(snapshot), computeError: "", ...historyPatch });
     saveWorkspace(snapshot);
+    void refreshDerived(snapshot);
   }
 
   function commit(snapshot: WorkspaceSnapshot) {
@@ -344,6 +354,7 @@ export const useCircuitStore = create<CircuitState>((set, get) => {
   return {
     ...startupSnapshot,
     ...initialComputed,
+    computeError: "",
     history: [],
     future: [],
     setModelType: (modelType) => {
@@ -442,38 +453,19 @@ export const useCircuitStore = create<CircuitState>((set, get) => {
     },
     setGeneratedCircuitGraph: (generatedCircuitGraph) => {
       const state = get();
-      const verification = buildVerification(
-        state.modelType,
-        state.flipFlopType,
-        state.variables,
-        state.stateTable,
-        state.nextStateEquations,
-        state.excitationEquations,
-        state.outputEquations,
-        state.timingTrace,
-        generatedCircuitGraph,
-      );
-      set({ generatedCircuitGraph, verification });
+      set({ generatedCircuitGraph, verification: pendingVerification(), computeError: "" });
+      void refreshDerived(snapshotOf(state), generatedCircuitGraph, state.timingTrace);
     },
     setTimingTrace: (timingTrace) => {
       const state = get();
-      const verification = buildVerification(
-        state.modelType,
-        state.flipFlopType,
-        state.variables,
-        state.stateTable,
-        state.nextStateEquations,
-        state.excitationEquations,
-        state.outputEquations,
-        timingTrace,
-        state.generatedCircuitGraph,
-      );
-      set({ timingTrace, verification });
+      set({ timingTrace, verification: pendingVerification(), computeError: "" });
+      void refreshDerived(snapshotOf(state), state.generatedCircuitGraph, timingTrace);
     },
-    recompute: () => {
+    recompute: async () => {
       const state = get();
-      const next = compute(state.modelType, state.flipFlopType, state.variables, state.stateTable, state.initialStateBits);
-      set(next);
+      await refreshDerived(snapshotOf(state), state.generatedCircuitGraph, state.timingTrace);
     },
   };
 });
+
+void useCircuitStore.getState().recompute();

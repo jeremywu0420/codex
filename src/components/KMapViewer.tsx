@@ -1,5 +1,4 @@
 import { Formula } from "./EquationDisplay";
-import { grayOrder } from "../logic/kmap";
 import { useCircuitStore } from "../store/useCircuitStore";
 import type { KMapModel } from "../types";
 
@@ -10,8 +9,8 @@ function groupColor(index: number) {
 }
 
 function KMapGrid({ map }: { map: KMapModel }) {
-  const rowLabels = grayOrder(map.rowVariables.length);
-  const colLabels = grayOrder(map.colVariables.length);
+  const rowLabels = map.rowLabels;
+  const colLabels = map.colLabels;
   const groupsByMinterm = new Map<number, number[]>();
   map.groups.forEach((group, groupIndex) => {
     for (const minterm of group.cells) {

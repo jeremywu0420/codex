@@ -115,7 +115,7 @@ export default function App() {
           </span>
           <div>
             <h1>Sequential Circuit Studio</h1>
-            <p>State table → diagrams, equations, circuit, timing and Verilog — fully client-side.</p>
+            <p>State table → diagrams, equations, circuit, timing and Verilog — backed by serverless compute.</p>
           </div>
         </div>
         <div className="app-header-meta">

@@ -4,7 +4,7 @@ import { buildDefaultInputSequence, generateTimingData } from "../logic/timing";
 import type { LogicValue, StateTableRow } from "../types";
 import { useCircuitStore } from "./useCircuitStore";
 
-function resetStoreToStableMealyD() {
+async function resetStoreToStableMealyD() {
   useCircuitStore.getState().setModelType("mealy");
   useCircuitStore.getState().setFlipFlopType("d");
   useCircuitStore.getState().setVariables({ inputs: ["X"], outputs: ["Z"] });
@@ -22,6 +22,7 @@ function resetStoreToStableMealyD() {
 
   useCircuitStore.getState().setGeneratedCircuitGraph(null);
   useCircuitStore.getState().setTimingTrace(null);
+  await useCircuitStore.getState().recompute();
 }
 
 function checkByName(name: string) {
@@ -36,13 +37,14 @@ function expectCheckedPass(name: string) {
   expect(check.passed).toBe(true);
 }
 
-function generateCircuitIntoStore() {
+async function generateCircuitIntoStore() {
   const graph = layoutCircuitGraph(useCircuitStore.getState().circuitGraph);
   useCircuitStore.getState().setGeneratedCircuitGraph(graph);
+  await useCircuitStore.getState().recompute();
   return graph;
 }
 
-function generateTimingIntoStore() {
+async function generateTimingIntoStore() {
   const state = useCircuitStore.getState();
   const timingData = generateTimingData(
     state.stateTable,
@@ -54,6 +56,7 @@ function generateTimingIntoStore() {
     buildDefaultInputSequence(state.variables.inputs, 4),
   );
   useCircuitStore.getState().setTimingTrace(timingData.steps);
+  await useCircuitStore.getState().recompute();
   return timingData.steps;
 }
 
@@ -67,13 +70,13 @@ function flipFirstStateBit(row: StateTableRow) {
 }
 
 describe("useCircuitStore verification integration", () => {
-  beforeEach(() => {
-    resetStoreToStableMealyD();
+  beforeEach(async () => {
+    await resetStoreToStableMealyD();
   });
 
-  it("recomputes verification and clears generated artifacts after state table edits", () => {
-    generateCircuitIntoStore();
-    generateTimingIntoStore();
+  it("recomputes verification and clears generated artifacts after state table edits", async () => {
+    await generateCircuitIntoStore();
+    await generateTimingIntoStore();
 
     expectCheckedPass("Circuit graph check");
     expectCheckedPass("Timing trace check");
@@ -91,15 +94,15 @@ describe("useCircuitStore verification integration", () => {
     expect(checkByName("Timing trace check")).toMatchObject({ skipped: true, passed: false });
   });
 
-  it("includes circuit graph validation after a generated circuit is stored", () => {
-    const graph = generateCircuitIntoStore();
+  it("includes circuit graph validation after a generated circuit is stored", async () => {
+    const graph = await generateCircuitIntoStore();
 
     expect(useCircuitStore.getState().generatedCircuitGraph).toBe(graph);
     expectCheckedPass("Circuit graph check");
   });
 
-  it("includes timing validation after generated timing steps are stored", () => {
-    const steps = generateTimingIntoStore();
+  it("includes timing validation after generated timing steps are stored", async () => {
+    const steps = await generateTimingIntoStore();
 
     expect(useCircuitStore.getState().timingTrace).toBe(steps);
     expectCheckedPass("Timing trace check");

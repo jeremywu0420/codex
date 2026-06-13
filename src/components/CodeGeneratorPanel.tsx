@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Clipboard, Download, PlayCircle } from "lucide-react";
-import { buildCodeGeneratorArtifacts, type CodeTabId } from "../logic/codeGenerator";
-import { layoutCircuitGraph } from "../logic/circuitLayout";
-import { buildDefaultInputSequence, generateTimingData } from "../logic/timing";
-import { runTestbenchSimulation } from "../logic/testbenchSimulation";
+import { generateCodeArtifactsApi } from "../api/codeGeneration";
+import type { CodeGenerationResult } from "../api/codeGeneration";
+import { runTestbenchSimulationApi } from "../api/testbenchSimulation";
 import type { TestbenchSimulationResult } from "../logic/testbenchSimulation";
 import { useCircuitStore } from "../store/useCircuitStore";
+
+type CodeTabId = "behavioral" | "gate" | "testbench";
+type CodeGeneratorVerificationStatus = "pass" | "fail" | "pending";
 
 const VERILOG_KEYWORDS = new Set([
   "always", "assign", "begin", "case", "casex", "casez", "default", "else", "end", "endcase",
@@ -71,7 +73,7 @@ function fallbackCopy(text: string) {
   textArea.remove();
 }
 
-function verificationLabel(status: ReturnType<typeof buildCodeGeneratorArtifacts>["verificationStatus"]) {
+function verificationLabel(status: CodeGeneratorVerificationStatus) {
   if (status === "fail") return "FAIL";
   if (status === "pending") return "PENDING";
   return "PASS";
@@ -80,12 +82,14 @@ function verificationLabel(status: ReturnType<typeof buildCodeGeneratorArtifacts
 function SimulationResultPanel({
   error,
   inputLabel,
+  isRunning,
   onRun,
   outputLabel,
   result,
 }: {
   error: string;
   inputLabel: string;
+  isRunning: boolean;
   onRun: () => void;
   outputLabel: string;
   result: TestbenchSimulationResult | null;
@@ -100,9 +104,9 @@ function SimulationResultPanel({
         <span className={`simulation-status ${status}`}>{statusText}</span>
       </div>
       <div className="simulation-actions">
-        <button onClick={onRun} type="button">
+        <button disabled={isRunning} onClick={onRun} type="button">
           <PlayCircle size={14} />
-          Run Simulation
+          {isRunning ? "Running..." : "Run Simulation"}
         </button>
       </div>
       {error ? <div className="diagram-alert error simulation-error">{error}</div> : null}
@@ -156,9 +160,8 @@ function SimulationResultPanel({
 
 export function CodeGeneratorPanel() {
   const {
-    circuitGraph,
-    equations,
     flipFlopType,
+    generatedCircuitGraph,
     initialStateBits,
     modelType,
     setGeneratedCircuitGraph,
@@ -166,67 +169,85 @@ export function CodeGeneratorPanel() {
     stateTable,
     timingTrace,
     variables,
-    verification,
   } = useCircuitStore();
   const [activeTab, setActiveTab] = useState<CodeTabId>("behavioral");
   const [copied, setCopied] = useState(false);
+  const [codeGenerationError, setCodeGenerationError] = useState("");
+  const [codeGenerationResult, setCodeGenerationResult] = useState<CodeGenerationResult | null>(null);
   const [verifyError, setVerifyError] = useState("");
+  const [isCodeGenerationLoading, setIsCodeGenerationLoading] = useState(false);
+  const [isVerificationRunning, setIsVerificationRunning] = useState(false);
+  const [isSimulationRunning, setIsSimulationRunning] = useState(false);
   const [simulationResult, setSimulationResult] = useState<TestbenchSimulationResult | null>(null);
   const [simulationError, setSimulationError] = useState("");
 
-  // Computes the circuit layout and a timing simulation headlessly so the
-  // skipped verification checks can run without visiting the other tabs.
-  function runVerification() {
+  const codeGenerationInput = useMemo(
+    () => ({
+      flipFlopType,
+      generatedCircuitGraph,
+      initialStateBits,
+      modelType,
+      stateTable,
+      timingTrace,
+      variables,
+    }),
+    [flipFlopType, generatedCircuitGraph, initialStateBits, modelType, stateTable, timingTrace, variables],
+  );
+  const codeGenerationSignature = useMemo(() => JSON.stringify(codeGenerationInput), [codeGenerationInput]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setCodeGenerationError("");
+    setIsCodeGenerationLoading(true);
+    generateCodeArtifactsApi(codeGenerationInput, controller.signal)
+      .then((result) => {
+        setCodeGenerationResult(result);
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setCodeGenerationResult(null);
+        setCodeGenerationError(error instanceof Error ? error.message : "Code generation failed.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setIsCodeGenerationLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [codeGenerationInput, codeGenerationSignature]);
+
+  async function runVerification() {
+    if (isVerificationRunning) return;
+    setCodeGenerationError("");
     setVerifyError("");
+    setIsVerificationRunning(true);
     try {
-      const layoutedGraph = layoutCircuitGraph(circuitGraph);
-      if (layoutedGraph.metadata.validationErrors?.length) {
-        throw new Error(`Circuit validation failed:\n${layoutedGraph.metadata.validationErrors.join("\n")}`);
-      }
-      const initialState = Object.fromEntries(
-        variables.states.map((stateName, index) => [stateName, (initialStateBits[index] ?? "0") as "0" | "1"]),
-      ) as Record<string, "0" | "1">;
-      const timingData = generateTimingData(
-        stateTable,
-        modelType,
-        flipFlopType,
-        variables.states,
-        variables.inputs,
-        variables.outputs,
-        buildDefaultInputSequence(variables.inputs),
-        initialState,
-      );
-      setGeneratedCircuitGraph(layoutedGraph);
-      setTimingTrace(timingData.steps);
+      const result = await generateCodeArtifactsApi({ ...codeGenerationInput, completeVerification: true });
+      setCodeGenerationResult(result);
+      setGeneratedCircuitGraph(result.generatedCircuitGraph);
+      setTimingTrace(result.timingTrace);
     } catch (error) {
       setVerifyError(error instanceof Error ? error.message : "Verification failed.");
+    } finally {
+      setIsVerificationRunning(false);
     }
   }
-  const artifacts = useMemo(
-    () =>
-      buildCodeGeneratorArtifacts({
-        equations,
-        flipFlopType,
-        modelType,
-        stateTable,
-        timingTrace,
-        variables,
-        verification,
-      }),
-    [equations, flipFlopType, modelType, stateTable, timingTrace, variables, verification],
-  );
+
+  const artifacts = codeGenerationResult?.artifacts ?? null;
+  const verificationForCode = codeGenerationResult?.verification ?? null;
+  const activeTimingTrace = codeGenerationResult?.timingTrace ?? timingTrace;
+  const verificationStatus: CodeGeneratorVerificationStatus = artifacts?.verificationStatus ?? "pending";
   const codeByTab: Record<CodeTabId, string> = {
-    behavioral: artifacts.behavioralVerilog,
-    gate: artifacts.gateLevelVerilog,
-    testbench: artifacts.testbench,
+    behavioral: artifacts?.behavioralVerilog ?? "",
+    gate: artifacts?.gateLevelVerilog ?? "",
+    testbench: artifacts?.testbench ?? "",
   };
   const activeCode = codeByTab[activeTab];
-  const canPreview = artifacts.isStateTableComplete && Boolean(activeCode);
-  const canDownload = canPreview && artifacts.verificationStatus === "pass";
-  const fsmDownloadCode = activeTab === "gate" ? artifacts.gateLevelVerilog : artifacts.behavioralVerilog;
+  const canPreview = Boolean(artifacts?.isStateTableComplete && activeCode);
+  const canDownload = canPreview && verificationStatus === "pass";
+  const fsmDownloadCode = activeTab === "gate" ? codeByTab.gate : codeByTab.behavioral;
   const simulationSignature = useMemo(
-    () => JSON.stringify({ flipFlopType, initialStateBits, modelType, stateTable, timingTrace, variables }),
-    [flipFlopType, initialStateBits, modelType, stateTable, timingTrace, variables],
+    () => JSON.stringify({ flipFlopType, initialStateBits, modelType, stateTable, activeTimingTrace, variables }),
+    [flipFlopType, initialStateBits, modelType, stateTable, activeTimingTrace, variables],
   );
 
   useEffect(() => {
@@ -245,22 +266,26 @@ export function CodeGeneratorPanel() {
     window.setTimeout(() => setCopied(false), 1400);
   }
 
-  function runSimulation() {
+  async function runSimulation() {
+    if (isSimulationRunning) return;
     setSimulationError("");
+    setIsSimulationRunning(true);
     try {
       setSimulationResult(
-        runTestbenchSimulation({
+        await runTestbenchSimulationApi({
           stateTable,
           variables,
           modelType,
           flipFlopType,
           initialStateBits,
-          timingTrace,
+          timingTrace: activeTimingTrace,
         }),
       );
     } catch (error) {
       setSimulationResult(null);
       setSimulationError(error instanceof Error ? error.message : "Simulation failed.");
+    } finally {
+      setIsSimulationRunning(false);
     }
   }
 
@@ -268,28 +293,30 @@ export function CodeGeneratorPanel() {
     <section className="panel code-generator-panel">
       <div className="code-generator-header">
         <h2>Code Generator</h2>
-        <span className={`code-status ${artifacts.verificationStatus}`}>{verificationLabel(artifacts.verificationStatus)}</span>
+        <span className={`code-status ${verificationStatus}`}>{isCodeGenerationLoading ? "LOADING" : verificationLabel(verificationStatus)}</span>
       </div>
 
-      {!artifacts.isStateTableComplete ? <div className="code-generator-message">{artifacts.missingDataMessage}</div> : null}
-      {artifacts.isStateTableComplete && artifacts.verificationStatus === "fail" ? (
+      {codeGenerationError ? <div className="diagram-alert error code-generator-alert">{codeGenerationError}</div> : null}
+      {isCodeGenerationLoading && !artifacts ? <div className="code-generator-message">Preparing code artifacts from backend...</div> : null}
+      {artifacts && !artifacts.isStateTableComplete ? <div className="code-generator-message">{artifacts.missingDataMessage}</div> : null}
+      {artifacts?.isStateTableComplete && verificationStatus === "fail" ? (
         <div className="diagram-alert warning code-generator-alert">Warning: current design has verification errors. Generated code may be incorrect.</div>
       ) : null}
-      {artifacts.isStateTableComplete && artifacts.verificationStatus === "pending" ? (
+      {artifacts?.isStateTableComplete && verificationStatus === "pending" ? (
         <div className="diagram-alert warning code-generator-alert code-generator-alert-action">
           <span>
             Verification has not run yet: it compares the generated circuit and a timing simulation against your state
             table before code can be downloaded.
           </span>
-          <button onClick={runVerification} type="button">
+          <button disabled={isVerificationRunning} onClick={runVerification} type="button">
             <PlayCircle size={14} />
-            Run Verification
+            {isVerificationRunning ? "Running..." : "Run Verification"}
           </button>
         </div>
       ) : null}
       {verifyError ? <div className="diagram-alert error code-generator-alert">{verifyError}</div> : null}
 
-      {artifacts.isStateTableComplete ? (
+      {artifacts?.isStateTableComplete ? (
         <>
           <div className="code-generator-interactive">
             <div className="code-tabs" role="tablist" aria-label="Code Generator Tabs">
@@ -313,6 +340,7 @@ export function CodeGeneratorPanel() {
                 <SimulationResultPanel
                   error={simulationError}
                   inputLabel={variables.inputs.join("") || "X"}
+                  isRunning={isSimulationRunning}
                   onRun={runSimulation}
                   outputLabel={variables.outputs.join("") || "Z"}
                   result={simulationResult}
@@ -332,7 +360,7 @@ export function CodeGeneratorPanel() {
               <Download size={15} />
               Download fsm.v
             </button>
-            <button disabled={!canDownload || !artifacts.testbench} onClick={() => downloadText("tb_fsm.v", artifacts.testbench)} type="button">
+            <button disabled={!canDownload || !codeByTab.testbench} onClick={() => downloadText("tb_fsm.v", codeByTab.testbench)} type="button">
               <Download size={15} />
               Download tb_fsm.v
             </button>
@@ -346,9 +374,9 @@ export function CodeGeneratorPanel() {
             <h3>Testbench</h3>
             <VerilogCode code={artifacts.testbench} />
             <h3>Verification Result</h3>
-            <p className="code-pdf-status">Status: {verificationLabel(artifacts.verificationStatus)}</p>
+            <p className="code-pdf-status">Status: {verificationLabel(verificationStatus)}</p>
             <ul className="code-pdf-verification">
-              {verification.checks.map((check) => (
+              {verificationForCode?.checks.map((check) => (
                 <li key={check.name}>
                   <strong>{check.name}</strong>: {check.skipped ? "SKIPPED" : check.passed ? "PASS" : "FAIL"} - {check.message}
                 </li>

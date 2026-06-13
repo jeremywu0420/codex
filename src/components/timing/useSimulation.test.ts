@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildInteractiveSimulation } from "./useSimulation";
+import { buildInteractiveSimulation } from "../../logic/interactiveSimulation";
 import type { StateTableRow, Variables } from "../../types";
 
 const variables: Variables = {

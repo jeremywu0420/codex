@@ -1,12 +1,11 @@
-import { excitationFor, pinLabelsFor } from "../logic/flipFlop";
 import { useCircuitStore } from "../store/useCircuitStore";
 import { Formula } from "./EquationDisplay";
-import type { FlipFlopType } from "../types";
+import type { FlipFlopType, LogicValue } from "../types";
 
 interface RuleRow {
   q: string;
   qNext: string;
-  values: string[];
+  values: LogicValue[];
 }
 
 const ruleRowsByType: Record<FlipFlopType, RuleRow[]> = {
@@ -43,11 +42,20 @@ const rulePinsByType: Record<FlipFlopType, string[]> = {
   sr: ["S", "R"],
 };
 
+function pinLabelsForRule(type: FlipFlopType, stateName: string): string[] {
+  return rulePinsByType[type].map((pin) => `${pin}_${stateName}`);
+}
+
+function excitationValuesForRule(type: FlipFlopType, current: string, next: LogicValue): LogicValue[] {
+  if (next === "-") return rulePinsByType[type].map(() => "-");
+  return ruleRowsByType[type].find((rule) => rule.q === current && rule.qNext === next)?.values ?? rulePinsByType[type].map(() => "-");
+}
+
 export function ExcitationTablePanel() {
   const { flipFlopType, stateTable, variables } = useCircuitStore();
   const rulePins = rulePinsByType[flipFlopType];
   const ruleRows = ruleRowsByType[flipFlopType];
-  const pinLabels = variables.states.flatMap((stateName) => pinLabelsFor(flipFlopType, stateName));
+  const pinLabels = variables.states.flatMap((stateName) => pinLabelsForRule(flipFlopType, stateName));
 
   return (
     <section className="panel output-panel excitation-panel">
@@ -96,8 +104,8 @@ export function ExcitationTablePanel() {
                     <td key={`${row.id}-ns-${state}`}>{row.nextState[state]}</td>
                   ))}
                   {variables.states.flatMap((state) => {
-                    const values = excitationFor(flipFlopType, row.currentState[state], row.nextState[state]);
-                    return pinLabelsFor(flipFlopType, state).map((label, index) => (
+                    const values = excitationValuesForRule(flipFlopType, row.currentState[state], row.nextState[state]);
+                    return pinLabelsForRule(flipFlopType, state).map((label, index) => (
                       <td className="excitation-cell" key={`${row.id}-${label}`}>
                         {values[index]}
                       </td>

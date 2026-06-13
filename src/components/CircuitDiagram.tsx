@@ -1,9 +1,9 @@
 import { useMemo, useRef, useState } from "react";
 import type Konva from "konva";
 import { Circle, Group, Layer, Line, Path, Rect, Stage, Text } from "react-konva";
-import { circuitGraphToSvg, collectWireJunctionDots, expandBounds, getCircuitContentBounds, layoutCircuitGraph } from "../logic/circuitLayout";
+import { layoutCircuitGraphApi } from "../api/circuitLayout";
 import { useCircuitStore } from "../store/useCircuitStore";
-import type { CircuitBounds, CircuitGraph, CircuitNode, Equation, FlipFlopType } from "../types";
+import type { CircuitBounds, CircuitGraph, CircuitNode, CircuitPoint, Equation, FlipFlopType } from "../types";
 
 const wire = "#1e293b";
 const ink = "#1e293b";
@@ -15,6 +15,17 @@ const bodyShadow = {
   shadowOffsetX: 0,
   shadowOffsetY: 1.5,
 };
+
+function expandBounds(bounds: CircuitBounds, padding: number): CircuitBounds {
+  return {
+    ...bounds,
+    x: bounds.x - padding,
+    y: bounds.y - padding,
+    width: bounds.width + padding * 2,
+    height: bounds.height + padding * 2,
+    padding,
+  };
+}
 
 function makeGridPattern() {
   if (typeof document === "undefined") return null;
@@ -210,10 +221,17 @@ function ClockLabels({ graph }: { graph: CircuitGraph }) {
   );
 }
 
-function RenderCircuitDiagram({ graph, showRoutingBounds = false }: { graph: CircuitGraph; showRoutingBounds?: boolean }) {
+function RenderCircuitDiagram({
+  graph,
+  junctionDots,
+  showRoutingBounds = false,
+}: {
+  graph: CircuitGraph;
+  junctionDots: CircuitPoint[];
+  showRoutingBounds?: boolean;
+}) {
   const gates = graph.nodes.filter((node) => node.type === "AND" || node.type === "OR" || node.type === "NOT");
   const flipFlops = graph.nodes.filter((node) => node.type === "FF");
-  const junctionDots = collectWireJunctionDots(graph);
 
   return (
     <>
@@ -351,6 +369,9 @@ export function CircuitDiagram({ showRoutingBounds = false }: CircuitDiagramProp
   const { circuitGraph, equations, flipFlopType, setGeneratedCircuitGraph, variables } = useCircuitStore();
   const stageRef = useRef<Konva.Stage>(null);
   const [graph, setGraph] = useState<CircuitGraph | null>(null);
+  const [contentBounds, setContentBounds] = useState<CircuitBounds | null>(null);
+  const [junctionDots, setJunctionDots] = useState<CircuitPoint[]>([]);
+  const [svgMarkup, setSvgMarkup] = useState("");
   const [generatedSignature, setGeneratedSignature] = useState("");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -362,24 +383,35 @@ export function CircuitDiagram({ showRoutingBounds = false }: CircuitDiagramProp
     [equations, flipFlopType, variables],
   );
   const gridTile = useMemo(makeGridPattern, []);
-  const contentBounds = useMemo(() => (graph ? getCircuitContentBounds(graph) : null), [graph]);
   const isOutdated = Boolean(graph && generatedSignature !== currentSignature);
-  const canUseDiagram = Boolean(graph);
+  const canUseDiagram = Boolean(graph && contentBounds);
 
   async function generateCircuit() {
     if (isLoading) return;
     setError("");
     if (!equations.length) {
+      setGraph(null);
+      setContentBounds(null);
+      setJunctionDots([]);
+      setSvgMarkup("");
       setGeneratedCircuitGraph(null);
       setError("No equations available. Generate equations before creating the circuit.");
       return;
     }
     if (!variables.states.length) {
+      setGraph(null);
+      setContentBounds(null);
+      setJunctionDots([]);
+      setSvgMarkup("");
       setGeneratedCircuitGraph(null);
       setError("No state variables available. Add at least one state variable.");
       return;
     }
     if (!flipFlopType) {
+      setGraph(null);
+      setContentBounds(null);
+      setJunctionDots([]);
+      setSvgMarkup("");
       setGeneratedCircuitGraph(null);
       setError("Select a flip-flop type before generating the circuit.");
       return;
@@ -388,22 +420,32 @@ export function CircuitDiagram({ showRoutingBounds = false }: CircuitDiagramProp
     setIsLoading(true);
     await Promise.resolve();
     try {
-      const layoutedGraph = layoutCircuitGraph(circuitGraph);
+      const result = await layoutCircuitGraphApi(circuitGraph, showRoutingBounds);
+      const layoutedGraph = result.graph;
       logCircuitGenerationDebug(layoutedGraph, equations, flipFlopType);
       if (layoutedGraph.metadata.validationErrors?.length) {
         setGraph(null);
+        setContentBounds(null);
+        setJunctionDots([]);
+        setSvgMarkup("");
         setGeneratedCircuitGraph(null);
         setError(`Circuit validation failed:\n${layoutedGraph.metadata.validationErrors.join("\n")}`);
         setIsLoading(false);
         return;
       }
       setGraph(layoutedGraph);
+      setContentBounds(result.contentBounds);
+      setJunctionDots(result.junctionDots);
+      setSvgMarkup(result.svg);
       setGeneratedCircuitGraph(layoutedGraph);
       setGeneratedSignature(currentSignature);
       setPosition({ x: 0, y: 0 });
       setZoom(1);
     } catch (generationError) {
       setGraph(null);
+      setContentBounds(null);
+      setJunctionDots([]);
+      setSvgMarkup("");
       setGeneratedCircuitGraph(null);
       setError(generationError instanceof Error ? generationError.message : "Circuit generation failed.");
     } finally {
@@ -426,11 +468,10 @@ export function CircuitDiagram({ showRoutingBounds = false }: CircuitDiagramProp
   }
 
   function downloadSvg() {
-    if (!graph) return;
-    const svg = circuitGraphToSvg(graph, showRoutingBounds);
+    if (!svgMarkup) return;
     const link = document.createElement("a");
     link.download = "logic-circuit.svg";
-    link.href = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+    link.href = URL.createObjectURL(new Blob([svgMarkup], { type: "image/svg+xml" }));
     link.click();
   }
 
@@ -478,7 +519,7 @@ export function CircuitDiagram({ showRoutingBounds = false }: CircuitDiagramProp
               ) : (
                 <Rect x={contentBounds.x} y={contentBounds.y} width={contentBounds.width} height={contentBounds.height} fill="white" />
               )}
-              <RenderCircuitDiagram graph={graph} showRoutingBounds={showRoutingBounds} />
+              <RenderCircuitDiagram graph={graph} junctionDots={junctionDots} showRoutingBounds={showRoutingBounds} />
             </Layer>
           </Stage>
         )}
