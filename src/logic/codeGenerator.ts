@@ -20,6 +20,7 @@ export interface CodeGeneratorArtifacts {
 export interface BuildCodeGeneratorInput {
   equations: Equation[];
   flipFlopType: FlipFlopType;
+  initialStateBits: string;
   modelType: ModelType;
   stateTable: StateTableRow[];
   timingTrace: TimingStep[] | null;
@@ -141,6 +142,13 @@ function binaryLiteral(bits: string) {
   return `${value.length}'b${value}`;
 }
 
+function normalizeInitialStateBits(initialStateBits: string, variables: Variables) {
+  const width = variables.states.length;
+  const bits = initialStateBits.slice(0, width);
+  if (bits.length === width && /^[01]*$/.test(bits)) return bits;
+  return "0".repeat(width);
+}
+
 function bitsFor(names: string[], record: Record<string, LogicValue>) {
   return names.map((name) => (record[name] === "1" ? "1" : "0")).join("");
 }
@@ -163,6 +171,21 @@ function uniqueStateBits(rows: StateTableRow[], variables: Variables) {
     seen.add(bits);
     ordered.push(bits);
   });
+  return ordered;
+}
+
+function uniqueStateBitsIncluding(rows: StateTableRow[], variables: Variables, includedBits: string) {
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+
+  const addBits = (bits: string) => {
+    if (seen.has(bits)) return;
+    seen.add(bits);
+    ordered.push(bits);
+  };
+
+  addBits(includedBits);
+  uniqueStateBits(rows, variables).forEach(addBits);
   return ordered;
 }
 
@@ -227,13 +250,19 @@ function renderModulePorts(variables: Variables, identifiers: VerilogIdentifiers
   return lines.map((line, index) => `${line}${index === lines.length - 1 ? "" : ","}`).join("\n");
 }
 
-function renderBehavioralNextStateBlock(rows: StateTableRow[], variables: Variables, identifiers: VerilogIdentifiers, modelType: ModelType) {
+function renderBehavioralNextStateBlock(
+  rows: StateTableRow[],
+  variables: Variables,
+  identifiers: VerilogIdentifiers,
+  modelType: ModelType,
+  initialStateBits: string,
+) {
   const stateBits = uniqueStateBits(rows, variables);
   const groupedRows = rowsByState(rows, variables);
   const outputTarget = signalConcat(variables.outputs, identifiers.outputs);
   const inputTarget = variables.inputs.length ? signalConcat(variables.inputs, identifiers.inputs) : "";
   const zeroOutput = binaryLiteral("0".repeat(variables.outputs.length));
-  const resetState = binaryLiteral("0".repeat(variables.states.length));
+  const resetState = stateConstantName(initialStateBits);
   const lines = [
     "always @(*) begin",
     "  next_state = state;",
@@ -256,7 +285,7 @@ function renderBehavioralNextStateBlock(rows: StateTableRow[], variables: Variab
         lines.push("        end");
       });
       lines.push("        default: begin");
-      lines.push(`          next_state = ${stateConstantName(resetState.replace(/^\d+'b/, ""))};`);
+      lines.push(`          next_state = ${resetState};`);
       lines.push("        end");
       lines.push("      endcase");
     } else if (stateRows[0]) {
@@ -267,7 +296,7 @@ function renderBehavioralNextStateBlock(rows: StateTableRow[], variables: Variab
     lines.push("    end");
   });
   lines.push("    default: begin");
-  lines.push(`      next_state = ${stateConstantName("0".repeat(variables.states.length))};`);
+  lines.push(`      next_state = ${resetState};`);
   lines.push("    end");
   lines.push("  endcase");
   lines.push("end");
@@ -301,11 +330,17 @@ function renderMooreOutputBlock(rows: StateTableRow[], variables: Variables, ide
   return lines.join("\n");
 }
 
-function generateBehavioralVerilog(rows: StateTableRow[], variables: Variables, modelType: ModelType, identifiers: VerilogIdentifiers) {
+function generateBehavioralVerilog(
+  rows: StateTableRow[],
+  variables: Variables,
+  modelType: ModelType,
+  identifiers: VerilogIdentifiers,
+  initialStateBits: string,
+) {
   const stateWidth = variables.states.length;
-  const stateBits = uniqueStateBits(rows, variables);
+  const stateBits = uniqueStateBitsIncluding(rows, variables, initialStateBits);
   const stateRange = packedRange(stateWidth);
-  const resetBits = binaryLiteral("0".repeat(stateWidth));
+  const resetBits = binaryLiteral(initialStateBits);
   const lines = [
     "module fsm (",
     renderModulePorts(variables, identifiers, "reg"),
@@ -327,7 +362,7 @@ function generateBehavioralVerilog(rows: StateTableRow[], variables: Variables, 
     "  end",
     "end",
     "",
-    renderBehavioralNextStateBlock(rows, variables, identifiers, modelType),
+    renderBehavioralNextStateBlock(rows, variables, identifiers, modelType, initialStateBits),
   ];
 
   if (modelType === "moore") {
@@ -353,12 +388,13 @@ function generateGateLevelVerilog(
   variables: Variables,
   flipFlopType: FlipFlopType,
   identifiers: VerilogIdentifiers,
+  initialStateBits: string,
 ) {
   const equationByLabel = new Map(equations.map((equation) => [equation.label, equation]));
   const ffInputLabels = variables.states.flatMap((stateName) => pinLabelsFor(flipFlopType, stateName));
   const ffInputWires = ffInputLabels.map((label) => identifiers.equationSignals[label]).filter(Boolean);
   const stateConcat = signalConcat(variables.states, identifiers.states);
-  const stateReset = binaryLiteral("0".repeat(variables.states.length));
+  const stateReset = binaryLiteral(initialStateBits);
   const lines = [
     "module fsm (",
     renderModulePorts(variables, identifiers, "wire"),
@@ -396,7 +432,12 @@ function generateGateLevelVerilog(
   return lines.join("\n");
 }
 
-function generateTestbench(variables: Variables, identifiers: VerilogIdentifiers, timingTrace: TimingStep[] | null) {
+function generateTestbench(
+  variables: Variables,
+  identifiers: VerilogIdentifiers,
+  timingTrace: TimingStep[] | null,
+  initialStateBits: string,
+) {
   if (!timingTrace?.length) {
     return [
       "`timescale 1ns/1ps",
@@ -409,6 +450,7 @@ function generateTestbench(variables: Variables, identifiers: VerilogIdentifiers
   const stateWidth = variables.states.length;
   const inputWidth = variables.inputs.length;
   const outputWidth = variables.outputs.length;
+  const resetStateBits = binaryLiteral(initialStateBits);
   const inputTarget = signalConcat(variables.inputs, identifiers.inputs);
   const outputTarget = signalConcat(variables.outputs, identifiers.outputs);
   const portNames = [
@@ -472,6 +514,10 @@ function generateTestbench(variables: Variables, identifiers: VerilogIdentifiers
     ...variables.inputs.map((name) => `  ${identifiers.inputs[name]} = 1'b0;`),
     "  #10;",
     `  ${identifiers.reset} = 1'b0;`,
+    "  #1;",
+    `  if (${identifiers.debugState} !== ${resetStateBits}) begin`,
+    `    $display("FAIL reset: expected state=%b, got state=%b", ${resetStateBits}, ${identifiers.debugState});`,
+    "  end",
     "",
     ...timingTrace.map((step) => {
       const inputBits = bitsFor(variables.inputs, step.input);
@@ -506,6 +552,7 @@ export function getCodeGeneratorVerificationStatus(verification: VerificationRes
 export function buildCodeGeneratorArtifacts(input: BuildCodeGeneratorInput): CodeGeneratorArtifacts {
   const identifiers = makeIdentifierMap(input.variables, input.flipFlopType, input.equations);
   const isStateTableComplete = hasCompleteStateTable(input.stateTable, input.variables);
+  const initialStateBits = normalizeInitialStateBits(input.initialStateBits, input.variables);
   const verificationStatus = getCodeGeneratorVerificationStatus(input.verification);
 
   if (!isStateTableComplete) {
@@ -520,11 +567,11 @@ export function buildCodeGeneratorArtifacts(input: BuildCodeGeneratorInput): Cod
   }
 
   return {
-    behavioralVerilog: generateBehavioralVerilog(input.stateTable, input.variables, input.modelType, identifiers),
-    gateLevelVerilog: generateGateLevelVerilog(input.equations, input.variables, input.flipFlopType, identifiers),
+    behavioralVerilog: generateBehavioralVerilog(input.stateTable, input.variables, input.modelType, identifiers, initialStateBits),
+    gateLevelVerilog: generateGateLevelVerilog(input.equations, input.variables, input.flipFlopType, identifiers, initialStateBits),
     isStateTableComplete,
     missingDataMessage: null,
-    testbench: generateTestbench(input.variables, identifiers, input.timingTrace),
+    testbench: generateTestbench(input.variables, identifiers, input.timingTrace, initialStateBits),
     verificationStatus,
   };
 }
