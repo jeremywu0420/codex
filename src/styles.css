@@ -400,6 +400,64 @@ select {
   color: #131c2e;
 }
 
+/* Fixed-position validation status: lives on the right of the tab bar so it never
+   shifts layout, and only the dot/label colour changes between states. */
+.validation-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: auto;
+  min-width: 116px;
+  justify-content: flex-end;
+  padding: 0 12px;
+  height: 34px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.validation-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+  flex: none;
+}
+
+.validation-status-busy {
+  color: var(--text-muted);
+}
+
+.validation-status-busy .validation-status-dot {
+  animation: validation-pulse 1s ease-in-out infinite;
+}
+
+.validation-status-ok {
+  color: var(--ok-text);
+}
+
+.validation-status-warn {
+  color: var(--warn-text);
+}
+
+@keyframes validation-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .validation-status-busy .validation-status-dot {
+    animation: none;
+  }
+}
+
 .tab-panel {
   display: none;
 }
