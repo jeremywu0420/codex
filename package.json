@@ -24,9 +24,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5174 --strictPort",
-    "build": "node scripts/clean-dist.cjs && tsc -b && vite build --emptyOutDir=false",
+    "typecheck:functions": "tsc -p tsconfig.functions.json",
+    "build": "node scripts/clean-dist.cjs && tsc -b && npm run typecheck:functions && vite build --emptyOutDir=false",
     "test": "vitest run",
-    "preview": "vite preview --host 0.0.0.0 --port 5174 --strictPort"
+    "preview": "vite preview --host 0.0.0.0 --port 5174 --strictPort",
+    "pages:dev": "wrangler pages dev"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.5.0",

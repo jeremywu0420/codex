@@ -1,0 +1,9 @@
+# Cloudflare Pages + Functions configuration.
+# Static assets are built into ./dist by `npm run build`; serverless routes
+# live under ./functions and are auto-discovered by Cloudflare Pages.
+#
+# Local full-stack dev (frontend + /api/* Functions):
+#   npm run build && npx wrangler pages dev
+name = "sequential-circuit-studio"
+compatibility_date = "2024-11-01"
+pages_build_output_dir = "dist"

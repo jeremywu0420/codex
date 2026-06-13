@@ -2,6 +2,16 @@
 
 This project can be deployed as a private-source frontend plus serverless API on Cloudflare Pages.
 
+## Repository Configuration
+
+These files in the repository drive the Cloudflare deployment:
+
+| File | Purpose |
+|---|---|
+| `wrangler.toml` | Pages project name, `compatibility_date`, and `pages_build_output_dir = "dist"`. Also enables `npm run pages:dev`. |
+| `public/_routes.json` | Restricts the Functions runtime to `/api/*`; every static asset is served directly (faster, fewer Function invocations). Vite copies it to `dist/_routes.json`. |
+| `tsconfig.functions.json` | Type-checks `functions/` (the backend). Wired into `npm run build` via `npm run typecheck:functions`, so a broken backend fails the build and CI. |
+
 ## Recommended Settings
 
 Use a private GitHub repository, then connect that repository to Cloudflare Pages.
@@ -14,6 +24,18 @@ Build command: npm run build
 Build output directory: dist
 Root directory: /
 Environment variable: VITE_BASE_PATH=/
+```
+
+## Local Full-Stack Development
+
+`npm run dev` serves only the frontend; the `src/api/*` clients fall back to local
+computation when `import.meta.env.DEV` is true, so the app works without a backend.
+
+To exercise the real `/api/*` Functions locally (same runtime as production):
+
+```bash
+npm run build
+npm run pages:dev   # wrangler pages dev — serves dist/ + functions/
 ```
 
 The frontend will be available at:
