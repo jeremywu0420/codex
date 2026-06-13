@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseBooleanEquation } from "./booleanParser";
 import { buildCircuitGraph } from "./circuitGraph";
+import { deriveSequentialPipeline } from "./equations";
 import {
   circuitGraphToSvg,
   collectWireJunctionDots,
@@ -15,7 +16,7 @@ import {
   segmentIntersectsBounds,
   segmentsOverlap,
 } from "./circuitLayout";
-import type { CircuitGraph, FlipFlopType, Variables } from "../types";
+import type { CircuitGraph, FlipFlopType, StateTableRow, Variables } from "../types";
 
 function variables(states: string[]): Variables {
   return {
@@ -28,6 +29,16 @@ function variables(states: string[]): Variables {
 
 function buildAndLayout(flipFlopType: FlipFlopType, states: string[], equations: Record<string, string>) {
   return layoutCircuitGraph(buildCircuitGraph({ equations, flipFlopType, variables: variables(states) }));
+}
+
+function stateTableRow(id: string, currentState: string, input: string, nextState: string, output: string): StateTableRow {
+  return {
+    id,
+    currentState: { A: currentState[0] as "0" | "1", B: currentState[1] as "0" | "1" },
+    input: { X: input as "0" | "1" },
+    nextState: { A: nextState[0] as "0" | "1", B: nextState[1] as "0" | "1" },
+    output: { Z: output as "0" | "1" },
+  };
 }
 
 function graphWithEdges(edges: CircuitGraph["edges"]): CircuitGraph {
@@ -678,6 +689,30 @@ describe("circuit graph generation", () => {
     expectNoWireObstacleCollisions(graph);
   });
 
+  it("routes derived JK product-term nets without sharing deterministic wire segments", () => {
+    const derivedVariables = variables(["A", "B"]);
+    const rows = [
+      stateTableRow("00-0", "00", "0", "01", "0"),
+      stateTableRow("00-1", "00", "1", "11", "1"),
+      stateTableRow("01-0", "01", "0", "10", "0"),
+      stateTableRow("01-1", "01", "1", "00", "1"),
+      stateTableRow("10-0", "10", "0", "11", "0"),
+      stateTableRow("10-1", "10", "1", "01", "1"),
+      stateTableRow("11-0", "11", "0", "00", "1"),
+      stateTableRow("11-1", "11", "1", "10", "0"),
+    ];
+    const pipeline = deriveSequentialPipeline(rows, derivedVariables, "mealy", "jk");
+    const equations = Object.fromEntries(pipeline.circuitEquations.map((equation) => [equation.label, equation.expression])) as Record<string, string>;
+    const graph = layoutCircuitGraph(buildCircuitGraph({ equations, flipFlopType: "jk", variables: derivedVariables }));
+
+    expect(equations.J_B).toBe("1");
+    expect(equations.K_B).toBe("1");
+    expect(graph.metadata.validationErrors ?? []).toEqual([]);
+    expectNoWireObstacleCollisions(graph);
+    expectNoFullyOverlappedWireSegments(graph);
+    expectAllWiresAreOrthogonal(graph);
+  });
+
   it("fans out shared D flip-flop input expressions without net conflicts", () => {
     const graph = buildAndLayout("d", ["A", "B"], {
       D_A: "X'",
@@ -720,6 +755,71 @@ describe("circuit graph generation", () => {
     expect(rEdges).toHaveLength(2);
     expect(new Set(sEdges.map((edge) => edge.netId)).size).toBe(1);
     expect(new Set(rEdges.map((edge) => edge.netId))).toEqual(new Set(["XNOT"]));
+  });
+
+  it("routes constant JK flip-flop inputs as local pin stubs", () => {
+    const graph = buildAndLayout("jk", ["A", "B"], {
+      J_A: "X",
+      K_A: "X",
+      J_B: "1",
+      K_B: "1",
+      Z: "X",
+    });
+    const jEdge = graph.edges.find((edge) => edge.label === "J_B");
+    const kEdge = graph.edges.find((edge) => edge.label === "K_B");
+
+    expect(graph.metadata.validationErrors ?? []).toEqual([]);
+    expect(jEdge).toBeTruthy();
+    expect(kEdge).toBeTruthy();
+    expect(jEdge?.from).toBe("const:J_B");
+    expect(kEdge?.from).toBe("const:K_B");
+    expect(jEdge?.metadata?.constantValue).toBe("1");
+    expect(kEdge?.metadata?.constantValue).toBe("1");
+    expect(jEdge?.metadata?.pinValue).toBe("1");
+    expect(kEdge?.metadata?.pinValue).toBe("1");
+
+    for (const edge of [jEdge!, kEdge!]) {
+      const points = toPointArray(edge.points ?? []);
+      expect(points).toHaveLength(2);
+      expect(points[0]).toEqual(edge.sourceAnchor);
+      expect(points[1]).toEqual(edge.targetAnchor);
+      expect(edge.sourceAnchor?.y).toBe(edge.targetAnchor?.y);
+      expect(edge.sourceAnchor?.x).toBe((edge.targetAnchor?.x ?? 0) - 34);
+      expect(edge.netId).toMatch(/^CONST_1_/);
+    }
+
+    expect(graph.nodes.find((node) => node.id === "const:J_B")).toMatchObject({
+      label: "1",
+      metadata: expect.objectContaining({ constantValue: "1", pinValue: "1" }),
+    });
+    expect(graph.nodes.find((node) => node.id === "const:K_B")).toMatchObject({
+      label: "1",
+      metadata: expect.objectContaining({ constantValue: "1", pinValue: "1" }),
+    });
+  });
+
+  it("routes constant-zero flip-flop inputs as local pin stubs", () => {
+    const graph = buildAndLayout("jk", ["A", "B"], {
+      J_A: "X",
+      K_A: "X",
+      J_B: "0",
+      K_B: "0",
+      Z: "X",
+    });
+    const constantEdges = graph.edges.filter((edge) => edge.to === "ff:B" && (edge.toPin === "J" || edge.toPin === "K"));
+
+    expect(graph.metadata.validationErrors ?? []).toEqual([]);
+    expect(constantEdges).toHaveLength(2);
+    for (const edge of constantEdges) {
+      const points = toPointArray(edge.points ?? []);
+      expect(edge.from).toMatch(/^const:/);
+      expect(edge.metadata?.constantValue).toBe("0");
+      expect(edge.metadata?.pinValue).toBe("0");
+      expect(points).toHaveLength(2);
+      expect(edge.sourceAnchor?.x).toBe((edge.targetAnchor?.x ?? 0) - 34);
+      expect(edge.sourceAnchor?.y).toBe(edge.targetAnchor?.y);
+      expect(edge.netId).toMatch(/^CONST_0_/);
+    }
   });
 
   it("fans out shared complements across three D flip-flop inputs", () => {

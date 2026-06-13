@@ -64,6 +64,10 @@ function makeNode(id: string, type: CircuitNode["type"], label: string, metadata
   return { id, type, label, x: 0, y: 0, metadata };
 }
 
+function isConstantAst(ast: BooleanAst): ast is Extract<BooleanAst, { type: "CONST" }> {
+  return ast.type === "CONST";
+}
+
 export function buildCircuitGraph({ equations, flipFlopType, variables }: CircuitGraphBuildInput): CircuitGraph {
   const normalizedEquations = normalizeEquations(equations);
   const nodes = new Map<string, CircuitNode>();
@@ -128,7 +132,7 @@ function netIdForEquationLabel(label: string) {
     const shouldShareExpression = (expressionUsage.get(expressionKey) ?? 0) > 1;
     if (shouldShareExpression && expressionRegistry.has(expressionKey)) return expressionRegistry.get(expressionKey)!;
 
-    if (ast.type === "CONST") return addNode(makeNode(`const:${ast.value}`, "INPUT", ast.value));
+    if (ast.type === "CONST") return addNode(makeNode(`const:${ast.value}`, "INPUT", ast.value, { constantValue: ast.value, pinValue: ast.value }));
     if (ast.type === "VAR") return sourceForVariable(ast.name);
     if (ast.type === "NOT" && ast.value.type === "VAR") return sourceForComplement(ast.value.name, target);
     if (ast.type === "NOT") {
@@ -180,6 +184,32 @@ function netIdForEquationLabel(label: string) {
         : { targetKind: "output", targetOutput: parsedLabel.outputName }),
     };
     const equationNetId = netIdForEquationLabel(equation.label);
+
+    if (parsedLabel.kind === "ff-input" && isConstantAst(ast)) {
+      const constNodeId = addNode(
+        makeNode(`const:${equation.label}`, "INPUT", ast.value, {
+          ...targetMetadata,
+          constantValue: ast.value,
+          pinValue: ast.value,
+          outputNetId: `CONST_${ast.value}_${equationNetId}`,
+        }),
+      );
+      addEdge({
+        from: constNodeId,
+        to: `ff:${parsedLabel.state}`,
+        toPin: parsedLabel.pin,
+        label: equation.label,
+        netId: `CONST_${ast.value}_${equationNetId}`,
+        metadata: {
+          ...targetMetadata,
+          constantValue: ast.value,
+          pinValue: ast.value,
+          outputNetId: `CONST_${ast.value}_${equationNetId}`,
+        },
+      });
+      continue;
+    }
+
     const rootId = buildFromAst(ast, { ...targetMetadata, outputNetId: equationNetId }, equationNetId);
     const rootNetId = sourceNetId(rootId);
 

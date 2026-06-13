@@ -44,6 +44,43 @@ function splitTarget(edge: CircuitEdge) {
   return null;
 }
 
+function constantValueOf(nodeOrEdge?: CircuitNode | CircuitEdge): "0" | "1" | null {
+  const value = nodeOrEdge?.metadata?.constantValue ?? nodeOrEdge?.metadata?.pinValue;
+  return value === "0" || value === "1" ? value : null;
+}
+
+function positionConstantPinSources(edges: CircuitEdge[], nodes: CircuitNode[]) {
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  for (const edge of edges) {
+    const fromNode = nodeById.get(edge.from);
+    const toNode = nodeById.get(edge.to);
+    const constantValue = constantValueOf(edge) ?? constantValueOf(fromNode);
+    if (!constantValue || toNode?.type !== "FF" || !fromNode) continue;
+
+    const targetPin = edge.toPin ?? (typeof edge.metadata?.targetPin === "string" ? edge.metadata.targetPin : undefined);
+    const target = inputAnchor(toNode, targetPin);
+    const source = { x: target.x - 34, y: target.y };
+    Object.assign(fromNode, {
+      x: source.x,
+      y: source.y,
+      width: 1,
+      height: 1,
+      metadata: {
+        ...fromNode.metadata,
+        constantValue,
+        labelX: source.x - 22,
+        labelY: source.y - 13,
+        pinValue: constantValue,
+      },
+    });
+    edge.metadata = {
+      ...edge.metadata,
+      constantValue,
+      pinValue: constantValue,
+    };
+  }
+}
+
 export function layoutCircuitGraph(graph: CircuitGraph): CircuitGraph {
   const next = cloneGraph(graph);
   const nodeById = new Map(next.nodes.map((node) => [node.id, node]));
@@ -291,6 +328,8 @@ export function layoutCircuitGraph(graph: CircuitGraph): CircuitGraph {
     const outputY = outputEdge ? slotYByTargetEdge.get(outputEdge.id ?? `${outputEdge.from}->${outputEdge.to}`) ?? targetStartY : targetStartY + (targetEdges.length + index) * targetSpacing;
     if (outputNode) Object.assign(outputNode, { x: zone.outputX, y: outputY, width: 1, height: 1 });
   });
+
+  positionConstantPinSources(next.edges, next.nodes);
 
   const routingBounds = next.nodes.map(getNodeBounds);
   routeEdges(next.edges, next.nodes, routingBounds);

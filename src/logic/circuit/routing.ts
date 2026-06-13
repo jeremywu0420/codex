@@ -177,6 +177,15 @@ function routeDirectSignalToOr(from: Point, to: Point, busX: number, toNode: Cir
   ]);
 }
 
+function constantValueOf(nodeOrEdge?: CircuitNode | CircuitEdge): "0" | "1" | null {
+  const value = nodeOrEdge?.metadata?.constantValue ?? nodeOrEdge?.metadata?.pinValue;
+  return value === "0" || value === "1" ? value : null;
+}
+
+function isConstantPinEdge(edge: CircuitEdge, fromNode?: CircuitNode, toNode?: CircuitNode) {
+  return Boolean((constantValueOf(edge) ?? constantValueOf(fromNode)) && toNode?.type === "FF");
+}
+
 function deterministicRouteEdge(edge: CircuitEdge, nodes: CircuitNode[]) {
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const resolved = resolveEdgeAnchors(edge, nodeById);
@@ -192,6 +201,10 @@ function deterministicRouteEdge(edge: CircuitEdge, nodes: CircuitNode[]) {
       : "";
 
   if (fromNode.type === "FF" && (toNode.type === "STATE" || toNode.type === "STATE_NOT")) {
+    return compactPoints([from, to]);
+  }
+
+  if (isConstantPinEdge(edge, fromNode, toNode)) {
     return compactPoints([from, to]);
   }
 
