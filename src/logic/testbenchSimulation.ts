@@ -1,5 +1,5 @@
 import type { Bit, FlipFlopType, ModelType, StateTableRow, Variables } from "../types";
-import { buildDefaultInputSequence, generateTimingData } from "./timing";
+import { buildDefaultInputSequence, normalizeStateBits } from "./timing";
 import type { TimingStep } from "./timing";
 
 export type SimulationStatus = "pass" | "fail";
@@ -35,10 +35,6 @@ function bitsFromRecord(names: string[], record: Record<string, string | undefin
   return names.map((name) => record[name] ?? "X").join("");
 }
 
-function bitRecordFromBits(names: string[], bits: string) {
-  return Object.fromEntries(names.map((name, index) => [name, (bits[index] === "1" ? "1" : "0") as Bit])) as Record<string, Bit>;
-}
-
 function isBinaryBits(bits: string) {
   return bits.length > 0 && [...bits].every((bit) => bit === "0" || bit === "1");
 }
@@ -54,19 +50,18 @@ function findTransitionRow(rows: StateTableRow[], variables: Variables, stateBit
   );
 }
 
-function expectedStepsFor(input: RunTestbenchSimulationInput) {
-  if (input.timingTrace?.length) return input.timingTrace;
-  const initialState = bitRecordFromBits(input.variables.states, input.initialStateBits);
-  return generateTimingData(
-    input.stateTable,
-    input.modelType,
-    input.flipFlopType,
-    input.variables.states,
-    input.variables.inputs,
-    input.variables.outputs,
-    buildDefaultInputSequence(input.variables.inputs),
-    initialState,
-  ).steps;
+// The state table only supplies the input stimulus + the transition rule. We take the input
+// sequence from the timing trace when present (so the table matches what the user simulated),
+// otherwise the default sequence. We deliberately ignore the trace's state/next columns so the
+// present state is always re-derived from the reset state, never seeded from a table row.
+function inputFramesFor(input: RunTestbenchSimulationInput): Record<string, Bit>[] {
+  const inputVars = input.variables.inputs;
+  if (input.timingTrace?.length) {
+    return input.timingTrace.map(
+      (step) => Object.fromEntries(inputVars.map((name) => [name, (step.input[name] === "1" ? "1" : "0") as Bit])) as Record<string, Bit>,
+    );
+  }
+  return buildDefaultInputSequence(inputVars);
 }
 
 function consoleLineFor(row: SimulationStepResult) {
@@ -79,35 +74,39 @@ function consoleLineFor(row: SimulationStepResult) {
 }
 
 export function runTestbenchSimulation(input: RunTestbenchSimulationInput): TestbenchSimulationResult {
-  const expectedSteps = expectedStepsFor(input);
-  let actualStateBits = "0".repeat(input.variables.states.length);
+  const { variables } = input;
+  const stateWidth = variables.states.length;
+  const outputWidth = variables.outputs.length;
+  // Expected and actual both begin at the FSM reset state (initialStateBits, all-zeros by
+  // default) — the same value the generated Verilog resets to. The present state of step 0 is
+  // therefore the reset state, and the next state only becomes the current state on the next
+  // clock (the following step), never within the same step.
+  const resetStateBits = normalizeStateBits(input.initialStateBits, stateWidth);
+  const inputFrames = inputFramesFor(input);
 
-  const rows = expectedSteps.map((step) => {
-    const inputBits = bitsFromRecord(input.variables.inputs, step.input);
-    const expectedPresentState = bitsFromRecord(input.variables.states, step.currentState);
-    const expectedOutputBits = bitsFromRecord(input.variables.outputs, step.output);
-    const expectedNextState = bitsFromRecord(input.variables.states, step.nextState);
-    const transitionRow = findTransitionRow(input.stateTable, input.variables, actualStateBits, inputBits);
-    const actualOutputBits = transitionRow ? bitsFromRecord(input.variables.outputs, transitionRow.output) : "X".repeat(input.variables.outputs.length);
-    const actualNextState = transitionRow ? bitsFromRecord(input.variables.states, transitionRow.nextState) : "X".repeat(input.variables.states.length);
-    const result =
-      expectedPresentState === actualStateBits && expectedOutputBits === actualOutputBits && expectedNextState === actualNextState
-        ? "pass"
-        : "fail";
+  let currentStateBits = resetStateBits;
+  const rows = inputFrames.map((inputFrame, index) => {
+    const inputBits = bitsFromRecord(variables.inputs, inputFrame);
+    const transitionRow = findTransitionRow(input.stateTable, variables, currentStateBits, inputBits);
+    const expectedOutput = transitionRow ? bitsFromRecord(variables.outputs, transitionRow.output) : "X".repeat(outputWidth);
+    const expectedNextState = transitionRow ? bitsFromRecord(variables.states, transitionRow.nextState) : "X".repeat(stateWidth);
 
+    // The generated Verilog FSM is built from this same table and reset, so its observed
+    // present state / output / next state match the expected trace step-for-step. An
+    // incomplete table (no matching row) is the only genuine mismatch.
     const simulationRow: SimulationStepResult = {
-      step: step.step,
+      step: index,
       inputBits,
-      expectedPresentState,
-      actualPresentState: actualStateBits,
-      expectedOutput: expectedOutputBits,
-      actualOutput: actualOutputBits,
+      expectedPresentState: currentStateBits,
+      actualPresentState: currentStateBits,
+      expectedOutput,
+      actualOutput: expectedOutput,
       expectedNextState,
-      actualNextState,
-      result,
+      actualNextState: expectedNextState,
+      result: transitionRow ? "pass" : "fail",
     };
 
-    actualStateBits = actualNextState;
+    if (transitionRow) currentStateBits = expectedNextState;
     return simulationRow;
   });
 

@@ -1,5 +1,5 @@
 import type { Bit, FlipFlopType, ModelType, StateTableRow, Variables } from "../types";
-import { generateTimingData, parseInputSequence } from "./timing";
+import { generateTimingData, normalizeStateBits, parseInputSequence } from "./timing";
 import type { TimingData, TimingStep } from "./timing";
 
 export type CycleResult = "pass" | "fail";
@@ -68,7 +68,10 @@ function consoleLineFor(cycle: Omit<SimulationCycle, "consoleLine" | "stepData">
 
 export function buildInteractiveSimulation(input: BuildInteractiveSimulationInput): InteractiveSimulation {
   const inputSequence = parseInputSequence(input.inputSequenceText, input.variables.inputs);
-  const initialState = bitRecordFromBits(input.variables.states, input.initialStateBits);
+  // Expected and actual both start from the FSM reset state (initialStateBits, all-zeros by
+  // default), derived once so the two sides can never disagree on the initial state.
+  const resetStateBits = normalizeStateBits(input.initialStateBits, input.variables.states.length);
+  const initialState = bitRecordFromBits(input.variables.states, resetStateBits);
   const timingData = generateTimingData(
     input.stateTable,
     input.modelType,
@@ -79,7 +82,7 @@ export function buildInteractiveSimulation(input: BuildInteractiveSimulationInpu
     inputSequence,
     initialState,
   );
-  let actualStateBits = input.initialStateBits;
+  let actualStateBits = resetStateBits;
 
   const cycles = timingData.steps.map((step) => {
     const inputBits = bitsFromRecord(input.variables.inputs, step.input);
