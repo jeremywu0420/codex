@@ -87,9 +87,14 @@ describe("useCircuitStore verification integration", () => {
       nextState: flipFirstStateBit(row),
     });
 
-    expect(useCircuitStore.getState().verification).not.toBe(previousVerification);
+    // The generated artifacts are invalidated synchronously on edit; the verification is
+    // kept stable until the recompute lands (so the validation badge does not flash).
     expect(useCircuitStore.getState().generatedCircuitGraph).toBeNull();
     expect(useCircuitStore.getState().timingTrace).toBeNull();
+
+    await useCircuitStore.getState().recompute();
+
+    expect(useCircuitStore.getState().verification).not.toBe(previousVerification);
     expect(checkByName("Circuit graph check")).toMatchObject({ skipped: true, passed: false });
     expect(checkByName("Timing trace check")).toMatchObject({ skipped: true, passed: false });
   });

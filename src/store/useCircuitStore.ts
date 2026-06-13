@@ -342,7 +342,12 @@ export const useCircuitStore = create<CircuitState>((set, get) => {
   }
 
   function applySnapshot(snapshot: WorkspaceSnapshot, historyPatch: Pick<CircuitState, "history" | "future">) {
-    set({ ...snapshot, ...emptyComputed(snapshot), computeError: "", ...historyPatch });
+    // Keep the previously computed equations/K-maps/verification/lint on screen while the
+    // backend recomputes, so editing the table never blanks the result panels or briefly
+    // flashes the validation badge. Only the user-generated artifacts are invalidated here,
+    // because they no longer match the edited table and must be regenerated; the race guard
+    // in refreshDerived discards any stale response.
+    set({ ...snapshot, generatedCircuitGraph: null, timingTrace: null, computeError: "", ...historyPatch });
     saveWorkspace(snapshot);
     void refreshDerived(snapshot);
   }
@@ -453,12 +458,14 @@ export const useCircuitStore = create<CircuitState>((set, get) => {
     },
     setGeneratedCircuitGraph: (generatedCircuitGraph) => {
       const state = get();
-      set({ generatedCircuitGraph, verification: pendingVerification(), computeError: "" });
+      // Keep the prior verification visible until the recompute lands so the validation
+      // badge does not flash while the new circuit graph is folded into the checks.
+      set({ generatedCircuitGraph, computeError: "" });
       void refreshDerived(snapshotOf(state), generatedCircuitGraph, state.timingTrace);
     },
     setTimingTrace: (timingTrace) => {
       const state = get();
-      set({ timingTrace, verification: pendingVerification(), computeError: "" });
+      set({ timingTrace, computeError: "" });
       void refreshDerived(snapshotOf(state), state.generatedCircuitGraph, timingTrace);
     },
     recompute: async () => {

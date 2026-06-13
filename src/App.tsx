@@ -104,7 +104,11 @@ export default function App() {
     }
   }, [theme]);
 
-  const validationCount = lint.errorCount + lint.warningCount + (verification.passed ? 0 : 1);
+  // While a compute is still pending every check is "skipped" (see pendingVerification): treat
+  // that as "not yet known" rather than a failure, so the badge never flashes a transient count.
+  const verificationPending = !verification.passed && verification.checks.every((check) => check.skipped);
+  const validationCount =
+    lint.errorCount + lint.warningCount + (verificationPending || verification.passed ? 0 : 1);
 
   return (
     <main id="report-root" className="app-shell">

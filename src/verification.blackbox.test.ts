@@ -200,9 +200,14 @@ describe("verification black-box scenarios", () => {
       nextState: flipFirstNextStateBit(row),
     });
 
-    expect(useCircuitStore.getState().verification).not.toBe(previousVerification);
+    // The generated artifacts are invalidated synchronously on edit; the verification is
+    // kept stable until the recompute lands (so the validation badge does not flash).
     expect(useCircuitStore.getState().generatedCircuitGraph).toBeNull();
     expect(useCircuitStore.getState().timingTrace).toBeNull();
+
+    await useCircuitStore.getState().recompute();
+
+    expect(useCircuitStore.getState().verification).not.toBe(previousVerification);
     expect(storeCheck("Circuit graph check")).toMatchObject({ skipped: true, passed: false });
     expect(storeCheck("Timing trace check")).toMatchObject({ skipped: true, passed: false });
   });
@@ -212,8 +217,9 @@ describe("verification black-box scenarios", () => {
     expect(storeCheck("Circuit graph check").passed).toBe(true);
 
     useCircuitStore.getState().setGeneratedCircuitGraph(null);
-
     expect(useCircuitStore.getState().generatedCircuitGraph).toBeNull();
+
+    await useCircuitStore.getState().recompute();
     expect(storeCheck("Circuit graph check")).toMatchObject({ skipped: true, passed: false });
   });
 
@@ -222,8 +228,9 @@ describe("verification black-box scenarios", () => {
     expect(storeCheck("Timing trace check").passed).toBe(true);
 
     useCircuitStore.getState().setTimingTrace(null);
-
     expect(useCircuitStore.getState().timingTrace).toBeNull();
+
+    await useCircuitStore.getState().recompute();
     expect(storeCheck("Timing trace check")).toMatchObject({ skipped: true, passed: false });
   });
 });
