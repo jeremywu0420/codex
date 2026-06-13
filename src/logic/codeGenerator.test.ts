@@ -37,6 +37,7 @@ const passedVerification = {
 describe("code generator", () => {
   it("uses the current state table for behavioral Verilog case statements", () => {
     const artifacts = buildCodeGeneratorArtifacts({
+      initialStateBits: "0",
       equations,
       flipFlopType: "jk",
       modelType: "mealy",
@@ -54,6 +55,7 @@ describe("code generator", () => {
 
   it("uses supplied simplified equations for gate-level assignments", () => {
     const artifacts = buildCodeGeneratorArtifacts({
+      initialStateBits: "0",
       equations,
       flipFlopType: "jk",
       modelType: "mealy",
@@ -72,6 +74,7 @@ describe("code generator", () => {
 
   it("uses the timing trace for testbench inputs, expected outputs, and state checks", () => {
     const artifacts = buildCodeGeneratorArtifacts({
+      initialStateBits: "0",
       equations,
       flipFlopType: "jk",
       modelType: "mealy",
@@ -89,6 +92,7 @@ describe("code generator", () => {
   it("blocks generation when the state table contains don't-care values", () => {
     const incompleteRows = rows.map((row, index) => (index === 0 ? { ...row, output: { Z: "-" as const } } : row));
     const artifacts = buildCodeGeneratorArtifacts({
+      initialStateBits: "0",
       equations,
       flipFlopType: "jk",
       modelType: "mealy",
