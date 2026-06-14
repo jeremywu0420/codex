@@ -8,7 +8,7 @@
  *   npx tsx scripts/build-overview-pdf.mts
  * (jspdf is already a project dependency; tsx + sharp are not bundled with the app.)
  */
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import sharp from "sharp";
@@ -46,6 +46,12 @@ async function svgToPng(svg: string, scale = 2): Promise<{ dataUrl: string; widt
     .toBuffer();
   const meta = await sharp(buffer).metadata();
   return { dataUrl: `data:image/png;base64,${buffer.toString("base64")}`, width: meta.width ?? 0, height: meta.height ?? 0 };
+}
+
+/** Load a committed PNG screenshot; dimensions come from the PNG IHDR header. */
+function loadPng(relPath: string): { dataUrl: string; width: number; height: number } {
+  const buffer = readFileSync(path.join(here, "..", relPath));
+  return { dataUrl: `data:image/png;base64,${buffer.toString("base64")}`, width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
 }
 
 function buildSampleArtifacts() {
@@ -174,6 +180,40 @@ async function main() {
     y += 6;
   }
 
+  function galleryRow(
+    left: { dataUrl: string; width: number; height: number },
+    leftCaption: string,
+    right: { dataUrl: string; width: number; height: number },
+    rightCaption: string,
+    rowH = 62,
+  ) {
+    const colW = (CONTENT_W - 8) / 2;
+    ensureSpace(rowH + 9);
+    const cells: Array<[typeof left, string, number]> = [
+      [left, leftCaption, MARGIN],
+      [right, rightCaption, MARGIN + colW + 8],
+    ];
+    for (const [png, caption, cellX] of cells) {
+      const ratio = png.height / png.width;
+      let w = colW;
+      let h = w * ratio;
+      if (h > rowH) {
+        h = rowH;
+        w = h / ratio;
+      }
+      const x = cellX + (colW - w) / 2;
+      setFill([255, 255, 255]);
+      doc.setDrawColor(line[0], line[1], line[2]);
+      doc.roundedRect(x - 1.4, y - 1.4, w + 2.8, h + 2.8, 1.2, 1.2, "FD");
+      doc.addImage(png.dataUrl, "PNG", x, y, w, h, undefined, "FAST");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      setColor([71, 85, 105]);
+      doc.text(caption, cellX + colW / 2, y + rowH + 4.5, { align: "center" });
+    }
+    y += rowH + 10;
+  }
+
   function pageFooter() {
     const total = doc.getNumberOfPages();
     for (let i = 1; i <= total; i += 1) {
@@ -244,6 +284,15 @@ async function main() {
   heading("Timing simulation");
   paragraph("The clock-driven waveform for the same machine, with state annotations underneath each cycle.", 10);
   image(timingPng, "Interactive timing diagram (authentic SVG output).", 70);
+
+  // ---- UI gallery (real screenshots of the running app) ----
+  doc.addPage();
+  y = MARGIN;
+  heading("The workbench");
+  paragraph("Live screenshots of the running app — one tab per design-flow stage, all driven by the same state table.", 10);
+  galleryRow(loadPng("docs/screenshots/state-diagram.png"), "State diagram", loadPng("docs/screenshots/kmaps.png"), "Excitation & K-Maps");
+  galleryRow(loadPng("docs/screenshots/circuit-diagram.png"), "Circuit diagram", loadPng("docs/screenshots/timing-diagram.png"), "Timing simulation");
+  galleryRow(loadPng("docs/screenshots/verilog.png"), "Verilog + testbench", loadPng("docs/screenshots/validation.png"), "Validation");
 
   // ---- architecture ----
   doc.addPage();

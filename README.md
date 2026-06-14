@@ -30,19 +30,93 @@ and architecture with authentic generated diagrams.
 | **Verilog** | Behavioral + gate-level modules and a self-checking testbench (honoring the configured reset/initial state), with syntax highlighting and one-click verification |
 | **Validation** | Static design lint (unreachable states, trap states, don't-care coverage, Moore conflicts) plus equation/circuit/timing cross-checks, surfaced through a debounced, non-flickering status indicator |
 
-### Workbench
+## Feature tour
 
-- Light / dark theme
-- Undo / redo, autosave to `localStorage`
-- Built-in example designs (sequence detectors, counters, an intentionally broken table for the validator)
-- **Design files**: export/import the whole design as JSON
-- **Share links**: the entire design encoded in the URL hash — send a link, no server involved
-- PDF report export
+Everything below is driven by a single state table. Edit any cell on the left and every tab
+recomputes (debounced) in the background, so the views always agree with each other.
 
-| | |
-|---|---|
-| ![State diagram](docs/screenshots/state-diagram.png) | ![Circuit](docs/screenshots/circuit-diagram.png) |
-| ![K-maps](docs/screenshots/kmaps.png) | ![Timing](docs/screenshots/timing-diagram.png) |
+### 1. State table editor & model setup
+
+The left sidebar is the single source of truth for the whole design:
+
+- **Model type** — *Mealy* (output depends on present state **and** input) or *Moore* (output depends on
+  the present state only; Moore outputs are auto-synced across rows of the same state).
+- **Flip-flop type** — *D / T / JK / SR*; the excitation table, equations, schematic flip-flops and Verilog
+  all adapt to the choice.
+- **Variables & initial state** — name the inputs/outputs and pick the reset state `(AB)`.
+- **State table** — click a *Next State* / *Output* cell to cycle `0 → 1 → −` (don't-care).
+- **Examples & actions** — load built-in designs (sequence detectors, up/down counter, an intentionally
+  broken table for the validator), undo/redo, clear, reset.
+
+### 2. State diagram
+
+![State diagram](docs/screenshots/state-diagram.png)
+
+An automatically laid-out FSM graph: symmetric node placement, curved edges with collision-avoiding
+`input / output` labels, a labelled **start** arrow at the reset state, and a *Simulate* shortcut.
+Exportable as PNG or SVG.
+
+### 3. Excitation table & K-maps
+
+![K-maps](docs/screenshots/kmaps.png)
+
+The excitation table applies the chosen flip-flop's excitation rules (with a built-in rule reference),
+and each equation gets a Karnaugh map with **gray-code headers** and coloured rings marking every
+prime-implicant group (Quine–McCluskey minimization), each with a legend.
+
+### 4. Boolean expressions
+
+![Boolean expressions](docs/screenshots/boolean-expressions.png)
+
+The minimized next-state, flip-flop-input (excitation) and output equations derived from the table —
+the exact expressions used to build the schematic and the gate-level Verilog.
+
+### 5. Circuit diagram
+
+![Circuit diagram](docs/screenshots/circuit-diagram.png)
+
+A gate-level schematic placed in left-to-right zones (inputs/inverters → product `AND`s → sum `OR`s →
+flip-flops → outputs), with **net-aware orthogonal routing** that guarantees two different signals never
+share a wire segment, signal-class colouring (input / state-feedback / logic / clock) and junction dots
+only at real branches. It is fully interactive:
+
+- **Hover** a part or wire to highlight its entire signal and dim the rest.
+- **Click** a part for an info card listing its pins and the net driving each.
+- **Values mode** — toggle each input and present-state bit and watch live `0 / 1 / X` values propagate
+  through every net; press **Clock ▶** to advance the state and see the clock-driven change.
+- **Fit-to-view**, scroll-to-zoom, drag-to-pan, and PNG / SVG export.
+
+### 6. Timing diagram
+
+![Timing diagram](docs/screenshots/timing-diagram.png)
+
+A clock-driven waveform (CLK, reset, inputs, state bits, outputs) plus a step-by-step **Simulation
+Table** that runs the machine from the **reset state** for an editable input sequence. Expected and
+actual present state / output / next state are checked per cycle (`next_state` becomes the current state
+only on the following clock), with a console log and Step / Auto-run / Run-all controls. PNG / SVG export.
+
+### 7. Verilog code
+
+![Verilog](docs/screenshots/verilog.png)
+
+Synthesizable **behavioral** and **gate-level** modules plus a **self-checking testbench**, all honoring
+the configured reset/initial state. One-click verification cross-checks the generated HDL against the
+table before download is unlocked; copy or download any artifact.
+
+### 8. Validation
+
+![Validation](docs/screenshots/validation.png)
+
+Continuous design lint (unreachable states, trap states, don't-care coverage, Moore output conflicts)
+plus equation / circuit / timing cross-checks, surfaced through a **debounced, non-flickering** status
+pill so the result never flashes while you type.
+
+### Workbench & sharing
+
+- Light / dark theme, undo / redo, autosave to `localStorage`.
+- **Design files** — export/import the whole design as JSON.
+- **Share links** — the entire design encoded in the URL hash; send a link, no server involved.
+- **PDF report** export of the full workspace.
 
 ![Dark mode](docs/screenshots/workspace-dark.png)
 
