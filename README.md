@@ -14,6 +14,10 @@ for the setup; the app is served from your project's `https://<project-name>.pag
 📄 **One-page tour:** [docs/PROJECT_OVERVIEW.pdf](docs/PROJECT_OVERVIEW.pdf) — overview, feature pipeline
 and architecture with authentic generated diagrams.
 
+📘 **Full project report (繁體中文):** [docs/REPORT.pdf](docs/REPORT.pdf) — complete development
+process, feature tour (with figures) and architecture. Source: [docs/REPORT.md](docs/REPORT.md);
+regenerate with `node scripts/build-report-pdf.mjs`.
+
 ![Workspace](docs/screenshots/workspace-light.png)
 
 ## Features
