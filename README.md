@@ -11,6 +11,9 @@ talks to serverless API routes that run the design-flow engine; no accounts and 
 **Deployment:** Cloudflare Pages + Functions. See [docs/cloudflare-deployment.md](docs/cloudflare-deployment.md)
 for the setup; the app is served from your project's `https://<project-name>.pages.dev/` domain.
 
+📄 **One-page tour:** [docs/PROJECT_OVERVIEW.pdf](docs/PROJECT_OVERVIEW.pdf) — overview, feature pipeline
+and architecture with authentic generated diagrams.
+
 ![Workspace](docs/screenshots/workspace-light.png)
 
 ## Features
@@ -22,10 +25,10 @@ for the setup; the app is served from your project's `https://<project-name>.pag
 | **Excitation table** | Derived from the flip-flop excitation rules, with a built-in rule reference card |
 | **K-maps** | Gray-code headers, per-product-term group rings with legend (Quine–McCluskey minimization) |
 | **Boolean expressions** | Minimized flip-flop input and output equations |
-| **Circuit diagram** | Auto-routed right-angle schematic with shared trunks, junction dots only at branches, blue clock network, PNG/SVG export |
-| **Timing diagram** | Cycle-accurate simulation from any initial state with a present-state annotation row and trace table |
-| **Verilog** | Behavioral + gate-level modules and a self-checking testbench, with syntax highlighting and one-click verification |
-| **Validation** | Static design lint (unreachable states, trap states, don't-care coverage, Moore conflicts) plus equation/circuit/timing cross-checks |
+| **Circuit diagram** | Zone-placed, net-aware orthogonal schematic (inputs → gates → flip-flops → outputs). **Interactive:** hover a part or wire to trace its whole signal, click a part for an info card (pins + driving nets), a live `0/1/X` **Values** probe that propagates input/state values and steps the clock, plus fit-to-view, scroll-zoom and PNG/SVG export |
+| **Timing diagram** | Cycle-accurate simulation from the reset state with a present-state annotation row and a step-by-step trace table |
+| **Verilog** | Behavioral + gate-level modules and a self-checking testbench (honoring the configured reset/initial state), with syntax highlighting and one-click verification |
+| **Validation** | Static design lint (unreachable states, trap states, don't-care coverage, Moore conflicts) plus equation/circuit/timing cross-checks, surfaced through a debounced, non-flickering status indicator |
 
 ### Workbench
 
@@ -68,15 +71,26 @@ functions/api/            # Cloudflare Pages Functions (the backend)
 
 src/
 ├── api/                  # typed fetch clients for the routes above (local fallback in dev)
-├── logic/                # design-flow engine: equations, minimizer, kmap, circuitLayout, codeGenerator…
+├── logic/                # design-flow engine (framework-agnostic, heavily unit-tested)
+│   ├── circuit/          #   modular circuit pipeline:
+│   │   ├── constants · geometry · nets · pins   #   sizes, points, net ids, pin/anchor model
+│   │   ├── routing · layout · validation        #   net-aware orthogonal routing + zone placement + checks
+│   │   ├── junctions · render                   #   connection dots + SVG serialization
+│   │   └── model · simulate                     #   view-model (signal/bus) + 0/1/X signal evaluation
+│   ├── equations · minimizer · kmap             #   derivation + Quine–McCluskey minimization
+│   ├── timing · interactiveSimulation · testbenchSimulation
+│   └── circuitGraph · codeGenerator             #   gate graph + Verilog generation
 ├── lib/                  # verification, designLint, workspace (design-file + share-link encoding)
-├── store/useCircuitStore.ts  # zustand store; optimistic UI, async backend recompute with race guarding
-└── components/           # React UI (tabs, panels, editors)
+├── store/useCircuitStore.ts  # zustand store: undo/redo, autosave, share links, and a debounced
+│                             #   idle/editing/validating/valid/invalid status machine
+└── components/           # React + react-konva UI (one panel per tab, kept presentational)
 ```
 
-Every edit optimistically clears derived state, then calls the backend to recompute the full pipeline;
-stale responses are discarded via a request id. Generated artifacts (circuit layout, timing trace) are
-invalidated on edit and verified against the table before Verilog export is unlocked.
+Every edit keeps the last stable result on screen, then (debounced) recomputes the full pipeline in the
+background; stale responses are discarded via a request id, so the result panels and validation badge
+never flash. Generated artifacts (circuit layout, timing trace) are invalidated on edit and verified
+against the table before Verilog export is unlocked. The circuit pipeline keeps layout/routing/validation
+as pure functions; an SVG view-model + signal simulator layer on top power the interactive diagram.
 
 ## Tech stack
 
