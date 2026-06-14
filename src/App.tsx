@@ -135,7 +135,7 @@ export default function App() {
             <CircuitBoard size={22} />
           </span>
           <div>
-            <h1>Sequential Circuit Studio</h1>
+            <h1>Sequential Circuit Design System 學號:1140570,姓名:吳浤澤</h1>
             <p>State table → diagrams, equations, circuit, timing and Verilog — backed by serverless compute.</p>
           </div>
         </div>
